@@ -128,6 +128,28 @@ def update_collectors() -> tuple[str | None, str | None]:
 VELO_DIR = PROJECT_ROOT / "velociraptor"
 
 
+def _get_ssl_context():
+    """Get an SSL context, falling back to unverified if certs aren't installed."""
+    import ssl
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+    # Try default context first
+    ctx = ssl.create_default_context()
+    try:
+        import urllib.request
+        urllib.request.urlopen("https://api.github.com", timeout=5, context=ctx)
+        return ctx
+    except Exception:
+        # SSL certs not installed — common on fresh macOS Python installs
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+
 def download_velociraptor(progress_cb=None) -> tuple[str | None, str | None]:
     """Download latest darwin amd64 + arm64 binaries from Velocidex releases.
 
@@ -138,6 +160,7 @@ def download_velociraptor(progress_cb=None) -> tuple[str | None, str | None]:
     import urllib.request
 
     VELO_DIR.mkdir(parents=True, exist_ok=True)
+    ssl_ctx = _get_ssl_context()
 
     if progress_cb:
         progress_cb("", 0, 0, "Fetching latest release info...")
@@ -146,7 +169,7 @@ def download_velociraptor(progress_cb=None) -> tuple[str | None, str | None]:
     api_url = "https://api.github.com/repos/Velocidex/velociraptor/releases/latest"
     try:
         req = urllib.request.Request(api_url, headers={"User-Agent": "Dissectify"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=ssl_ctx) as resp:
             release = _json.loads(resp.read())
     except Exception as e:
         return None, f"Failed to fetch release info: {e}"
@@ -188,7 +211,7 @@ def download_velociraptor(progress_cb=None) -> tuple[str | None, str | None]:
                 asset["browser_download_url"],
                 headers={"User-Agent": "Dissectify"},
             )
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=300, context=ssl_ctx) as resp:
                 chunk_size = 65536
                 received = 0
                 with open(str(dest), "wb") as f:
