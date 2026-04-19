@@ -1,0 +1,19 @@
+name: MacOS.Collection.ScreenSharing
+description: |
+  Collect the list of connected hosts with Screen Sharing
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: ScreenSharingGlob
+  default: /Users/*/Library/Containers/com.apple.ScreenSharing/Data/Library/Preferences/com.apple.ScreenSharing.plist,/private/var/db/com.apple.xpc.launchd/**
+
+sources:
+- name: ScreenSharing file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=ScreenSharingGlob, sep=","))

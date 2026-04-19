@@ -1,0 +1,19 @@
+name: MacOS.Collection.cookies
+description: |
+  Collect .binarycookies, .cookies files and HSTS.plist for each user
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: cookieGlob
+  default: /Users/*/Library/Cookies/**,/Users/*/Library/Containers/com.apple.Safari/Data/Library/Cookies/**
+
+sources:
+- name: cookie file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=cookieGlob, sep=","))

@@ -1,0 +1,19 @@
+name: MacOS.Collection.ScreenTime
+description: |
+  Collect ScreenTime database for program and app usage
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: ScreenTimeGlob
+  default: /private/var/folders/*/*/0/com.apple.ScreenTimeAgent/**
+
+sources:
+- name: ScreenTime file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=ScreenTimeGlob, sep=","))

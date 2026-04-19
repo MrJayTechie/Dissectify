@@ -1,0 +1,19 @@
+name: MacOS.Collection.ManagedDeviceProfile
+description: |
+  Collect Managed device profiles
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: ManagedDeviceProfileGlob
+  default: /private/var/db/ConfigurationProfiles/**
+
+sources:
+- name: ManagedDeviceProfile file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=ManagedDeviceProfileGlob, sep=","))

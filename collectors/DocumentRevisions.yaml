@@ -1,0 +1,19 @@
+name: MacOS.Collection.DocumentRevisions
+description: |
+  Collect DocumentRevisions database
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: DocumentRevisionGlob
+  default: /System/Volumes/Data/.DocumentRevisions-V100/**,/System/Volumes/Data/%2EDocumentRevisions-V100/**,/.DocumentRevisions-V100/**,/%2EDocumentRevisions-V100/**
+
+sources:
+- name: DocumentRevisions-V100 file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=DocumentRevisionGlob, sep=","))

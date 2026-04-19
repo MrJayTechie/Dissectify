@@ -1,0 +1,18 @@
+name: MacOS.Collection.Users
+description: |
+  Collect files from /private/var/db/dslocal/nodes/Default/users/** and /private/var/db/dslocal/nodes/Default/groups/** to upload the file contents.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: UsersGlob
+  default: /private/var/db/dslocal/nodes/Default/users/**,/private/var/db/dslocal/nodes/Default/groups/**
+
+sources:
+- name: Users Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=UsersGlob, sep=","))

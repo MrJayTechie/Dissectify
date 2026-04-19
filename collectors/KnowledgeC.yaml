@@ -1,0 +1,18 @@
+name: MacOS.Collection.KnowledgeC
+description: |
+  Find KnowledgeC DB files on macOS, capture basic metadata and upload the file contents.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: KCDBGlob
+  description: knowledgeC.db plus -wal/-shm sidecars (uncommitted writes live in WAL).
+  default: /private/var/db/CoreDuet/Knowledge/knowledgeC.db,/private/var/db/CoreDuet/Knowledge/knowledgeC.db-wal,/private/var/db/CoreDuet/Knowledge/knowledgeC.db-shm,/Users/*/Library/Application Support/Knowledge/knowledgeC.db,/Users/*/Library/Application Support/Knowledge/knowledgeC.db-wal,/Users/*/Library/Application Support/Knowledge/knowledgeC.db-shm
+sources:
+- name: knowledgeC files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=KCDBGlob, sep=","))

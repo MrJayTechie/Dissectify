@@ -1,0 +1,19 @@
+name: MacOS.Collection.FsEvents
+description: |
+    Collect file system event logs (from .fseventsd)
+ 
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: fseventsGlob
+  default: /.fseventsd/**,/%2Efseventsd/**,/System/Volumes/Data/.fseventsd/**,/System/Volumes/Data/%2Efseventsd/**,/private/var/db/fseventsd/**
+
+sources:
+- name: FsEvents Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=fseventsGlob, sep=","))

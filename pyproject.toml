@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dissectify"
+version = "1.0.0"
+description = "Dissectify — macOS Forensic Analysis Toolkit for collection triage, artifact parsing, and evidence export"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    {name = "Ali Jammal"},
+]
+dependencies = [
+    "dissect.target",
+    "textual>=0.80.0",
+    "openpyxl>=3.1.0",
+]
+
+[project.scripts]
+dissectify = "macos_ir.__main__:main"
+macos-ir = "macos_ir.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

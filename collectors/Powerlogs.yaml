@@ -1,0 +1,20 @@
+name: MacOS.Collection.Powerlogs
+description: |
+ Shows nearly the same data as knowledgeC.db and Biomes. However, it may include additional data such as CarPlay, home screen, lock screen, and Siri usage.
+ 
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: PowelogGlob
+  description: CurrentPowerlog.PLSQL plus -wal/-shm sidecars (uncommitted writes live in WAL).
+  default: /private/var/db/powerlog/Library/BatteryLife/CurrentPowerlog.PLSQL,/private/var/db/powerlog/Library/BatteryLife/CurrentPowerlog.PLSQL-wal,/private/var/db/powerlog/Library/BatteryLife/CurrentPowerlog.PLSQL-shm
+
+sources:
+- name: Powerlog Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=PowelogGlob, sep=","))

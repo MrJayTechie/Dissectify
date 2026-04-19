@@ -1,0 +1,17 @@
+name: MacOS.Collection.FavoriteVolumes
+description: |
+  Collect FavoriteVolumes /Users/*/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.FavoriteItems.*
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: FavoriteVolumesGlob
+  default: /Users/*/Library/Application Support/com.apple.sharedfilelist/*.sfl3
+
+sources:
+- name: FavoriteVolumes Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=FavoriteVolumesGlob, sep=","))

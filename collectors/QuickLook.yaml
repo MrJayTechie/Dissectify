@@ -1,0 +1,20 @@
+name: MacOS.Collection.QuickLook
+description: |
+  Collect QuickLook index.sqlite and thumbnails.data
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: QuickLookGlob
+  description: index.sqlite plus -wal/-shm sidecars and thumbnails.data.
+  default: /private/var/folders/*/*/C/com.apple.QuickLook.thumbnailcache/index.sqlite,/private/var/folders/*/*/C/com.apple.QuickLook.thumbnailcache/index.sqlite-wal,/private/var/folders/*/*/C/com.apple.QuickLook.thumbnailcache/index.sqlite-shm,/private/var/folders/*/*/C/com.apple.QuickLook.thumbnailcache/thumbnails.data
+  
+sources:
+- name: QuickLook file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=QuickLookGlob, sep=","))

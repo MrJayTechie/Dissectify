@@ -1,0 +1,30 @@
+name: MacOS.Collection.ChromiumBrowsers
+description: |
+  Collect forensic databases from all Chromium-based browsers
+  (Chrome, Brave, Edge, Chromium, Opera, Vivaldi).
+
+  Targets only the files needed by the dissect chromium plugin:
+  History, Cookies, Bookmarks, Login Data, Web Data, Shortcuts, Top Sites,
+  Favicons, Preferences and the Local State file (contains profile
+  encryption key). File-level globs avoid pulling in multi-GB Cache and
+  Service Worker directories.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: ChromiumProfileGlob
+  description: Glob for profile-level forensic databases across every Chromium browser and profile.
+  default: /Users/*/Library/Application Support/{Google/Chrome,BraveSoftware/Brave-Browser,BraveSoftware/Brave-Browser-Beta,BraveSoftware/Brave-Browser-Nightly,Microsoft Edge,Microsoft Edge Beta,Microsoft Edge Dev,Chromium,com.operasoftware.Opera,com.operasoftware.OperaGX,Vivaldi}/{Default,Profile*,Guest Profile}/{History,History-journal,History-wal,Cookies,Cookies-journal,Cookies-wal,Bookmarks,Bookmarks.bak,Login Data,Login Data-journal,Login Data For Account,Login Data For Account-journal,Web Data,Web Data-journal,Shortcuts,Shortcuts-journal,Top Sites,Top Sites-journal,Favicons,Favicons-journal,Preferences,Secure Preferences,Visited Links,Network Action Predictor,Network Action Predictor-journal}
+
+- name: ChromiumRootGlob
+  description: Glob for browser-root files (Local State contains the per-profile encryption key).
+  default: /Users/*/Library/Application Support/{Google/Chrome,BraveSoftware/Brave-Browser,BraveSoftware/Brave-Browser-Beta,BraveSoftware/Brave-Browser-Nightly,Microsoft Edge,Microsoft Edge Beta,Microsoft Edge Dev,Chromium,com.operasoftware.Opera,com.operasoftware.OperaGX,Vivaldi}/{Local State,First Run}
+
+sources:
+- name: Chromium browser files (all matched)
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=[ChromiumProfileGlob, ChromiumRootGlob])

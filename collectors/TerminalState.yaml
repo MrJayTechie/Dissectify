@@ -1,0 +1,19 @@
+name: MacOS.Collection.TerminalState
+description: |
+  Collect of TerminalState created on macOS
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: TerminalStateGlob   
+  default: /Users/*/Library/Saved Application State/com.apple.Terminal.savedState/**,/Users/*/Library/Daemon Containers/*/Data/Library/Saved Application State/com.apple.Terminal.savedState/**
+
+sources:
+- name: TerminalState file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=TerminalStateGlob, sep=","))

@@ -1,0 +1,20 @@
+name: MacOS.Collection.SoftwareInstallationUpdates
+description: |
+ Determine installed applications and updates, including timestamps, Package names, and software used to install an application.
+ 
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: SoftwareInstallationUpdatesGlobs
+  description: storeSystem.db plus -wal/-shm sidecars, install receipts, SoftwareUpdate prefs.
+  default: /Users/*/Library/Caches/com.apple.appstoreagent/storeSystem.db,/Users/*/Library/Caches/com.apple.appstoreagent/storeSystem.db-wal,/Users/*/Library/Caches/com.apple.appstoreagent/storeSystem.db-shm,/Library/Receipts/InstallHistory.plist,/var/db/receipts/**,/Library/Preferences/com.apple.SoftwareUpdate.plist
+
+sources:
+- name: SoftwareInstallationUpdates Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=SoftwareInstallationUpdatesGlobs, sep=","))

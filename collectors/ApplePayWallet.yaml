@@ -1,0 +1,18 @@
+name: MacOS.Collection.ApplePayWallet
+description: |
+  View Apple pay transactions stored in /Users/*/Library/Passes/passes23.sqlite
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: ApplePayGlob
+  description: passes23.sqlite plus -wal/-shm sidecars (uncommitted writes live in WAL).
+  default: /Users/*/Library/Passes/passes23.sqlite,/Users/*/Library/Passes/passes23.sqlite-wal,/Users/*/Library/Passes/passes23.sqlite-shm
+
+sources:
+- name: ApplePay files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=ApplePayGlob, sep=","))

@@ -1,0 +1,18 @@
+name: MacOS.Collection.Autostart
+description: |
+  Contains programs, daemons, services set to start at boot/login
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: AutostartGlob
+  default: /System/Library/Extensions/**,/Library/Extensions/**,/System/Library/LaunchDaemons/**,/Library/LaunchDaemons/**,/System/Library/LaunchAgents/**,/Library/LaunchAgents/**,/Users/*/Library/LaunchAgents/**,/System/Library/StartupItems/**,/Library/StartupItems/**,/private/etc/periodic/daily/**,/private/etc/periodic/monthly/**,/private/etc/periodic/weekly/**,/private/etc/launchd.conf,/private/etc/rc.common
+ 
+sources:
+- name: Autostart File
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=AutostartGlob, sep=","))

@@ -1,0 +1,19 @@
+name: MacOS.Collection.AddressBook
+description: |
+  Collect AddressBook from macOS endpoints.
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: AddressBookGlob
+  default: /Users/*/Library/Application Support/AddressBook/**
+
+sources:
+- name: AddressBook file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=AddressBookGlob, sep=","))

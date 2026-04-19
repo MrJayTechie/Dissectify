@@ -1,0 +1,19 @@
+name: MacOS.Collection.xpdb
+description: |
+    Collects XProtect diagnostic files and XProtect Behavior Service database 
+ 
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: xpdbGlob
+  default: /private/var/protected/xprotect/db/**
+
+sources:
+- name: xpdb Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=xpdbGlob, sep=","))

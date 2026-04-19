@@ -1,0 +1,20 @@
+name: MacOS.Collection.FaceTime
+description: |
+  Collect available facetime call metadata
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: FaceTimeGlob
+  description: FaceTime.sqlite3 plus -wal/-shm sidecars (uncommitted writes live in WAL).
+  default: /Users/*/Library/Application Support/FaceTime/FaceTime.sqlite3,/Users/*/Library/Application Support/FaceTime/FaceTime.sqlite3-wal,/Users/*/Library/Application Support/FaceTime/FaceTime.sqlite3-shm
+
+sources:
+- name: FaceTime file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=FaceTimeGlob, sep=","))

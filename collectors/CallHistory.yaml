@@ -1,0 +1,20 @@
+name: MacOS.Collection.CallHistory
+description: |
+  Collect CallHistory from macOS endpoints.
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: CallHistoryGlob
+  description: CallHistory.storedata plus -wal/-shm sidecars (uncommitted writes live in WAL).
+  default: /Users/*/Library/Application Support/CallHistoryDB/CallHistory.storedata,/Users/*/Library/Application Support/CallHistoryDB/CallHistory.storedata-wal,/Users/*/Library/Application Support/CallHistoryDB/CallHistory.storedata-shm
+
+sources:
+- name: CallHistory file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=CallHistoryGlob, sep=","))

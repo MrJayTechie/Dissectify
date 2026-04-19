@@ -1,0 +1,18 @@
+name: MacOS.Collection.FirefoxFiles
+description: |
+  Find Firefox files on macOS and upload the file contents.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: FireFoxGlobs
+  default: /Users/*/Library/Application Support/Firefox/Profiles/**
+
+sources:
+- name: Firefox files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=FireFoxGlobs, sep=","))

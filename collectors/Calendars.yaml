@@ -1,0 +1,18 @@
+name: MacOS.Collection.Calendars
+description: |
+  Collection of Calendars
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: CalendarsGlob
+  default: /Users/*/Library/Calendars/**
+
+sources:
+- name: Calendars files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=CalendarsGlob, sep=","))

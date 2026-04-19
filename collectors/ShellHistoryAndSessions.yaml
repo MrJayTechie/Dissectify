@@ -1,0 +1,29 @@
+name: MacOS.Collection.ShellHistoryAndSessions
+description: |
+  Find and upload common shell history files and session files on macOS
+  (bash, zsh and session files).
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: HistoryGlob
+  default: '["/Users/*/.bash_history","/Users/*/%2Ebash_history","/Users/*/.zsh_history","/Users/*/%2Ezsh_history","/Users/*/.history","/Users/*/%2Ehistory","/root/.bash_history","/root/%2Ebash_history","/root/.zsh_history","/root/%2Ezsh_history"]'
+- name: SessionsGlob
+  default: '["/Users/*/.bash_sessions/**","/Users/*/%2Ebash_sessions/**","/Users/*/.zsh_sessions/**","/Users/*/%2Ezsh_sessions/**","/Users/*/.bash_sessions/*.history","/Users/*/%2Ebash_sessions/*.history","/Users/*/.zsh_sessions/*.history","/Users/*/%2Ezsh_sessions/*.history"]'
+
+sources:
+- name: Shell history files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=parse_json_array(data=HistoryGlob))
+
+- name: Shell session files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=parse_json_array(data=SessionsGlob))
+

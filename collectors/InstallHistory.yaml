@@ -1,0 +1,19 @@
+name: MacOS.Collection.InstallHistory
+description: |
+  Collect /Library/Receipts/InstallHistory.plist from macOS endpoints.
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: InstallHistoryGlob
+  default: /Library/Receipts/InstallHistory.plist
+
+sources:
+- name: InstallHistory file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=InstallHistoryGlob, sep=","))

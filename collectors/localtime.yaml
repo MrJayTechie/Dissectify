@@ -1,0 +1,18 @@
+name: MacOS.Collection.localtime
+description: |
+  /etc/localtime on macOS to check Current Time Zone and upload the file contents.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: LocalGlob
+  default: /etc/localtime
+
+sources:
+- name: LocalTime Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=LocalGlob, sep=","))

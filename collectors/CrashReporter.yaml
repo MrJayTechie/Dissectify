@@ -1,0 +1,19 @@
+name: MacOS.Collection.CrashReporter
+description: |
+  Collect crash reporter plists
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: CrashReporterGlob
+  default: /Users/*/Library/Application Support/CrashReporter/*.plist
+
+sources:
+- name: CrashReporter file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=CrashReporterGlob, sep=","))

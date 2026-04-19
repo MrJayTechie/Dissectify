@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.DS_Store
+velociraptor/
+builds/
+collected-artifacts/
+*.cast
+generate_demo.py
+generate_gif.py
+record_demo.sh

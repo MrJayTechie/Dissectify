@@ -1,0 +1,19 @@
+name: MacOS.Collection.notes
+description: |
+  Collect notes from macOS endpoints.
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: notesGlob
+  default: /Users/*/Library/Group Containers/group.com.apple.notes/**,/Users/*/Library/Containers/com.apple.Notes/Data/Library/Notes/**
+
+sources:
+- name: notes file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=notesGlob, sep=","))

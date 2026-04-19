@@ -1,0 +1,23 @@
+name: MacOS.Collection.DSStore
+description: |
+  Find .DS_Store files on macOS, capture basic metadata and upload the file contents.
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: DSGlobs
+  description: |
+    Glob list for .DS_Store discovery. Note: /Volumes/Macintosh HD is a firmlink
+    to / on APFS, so /Volumes/**/.DS_Store is intentionally excluded — it would
+    re-walk the entire boot volume. To collect DS_Store from a specific external
+    volume, append it explicitly (e.g. "/Volumes/Backup/**/.DS_Store").
+  default: '["/Users/**/.DS_Store","/Users/**/%2EDS_Store","/Applications/**/.DS_Store","/Applications/**/%2EDS_Store","/Library/**/.DS_Store","/Library/**/%2EDS_Store"]'
+
+sources:
+- name: DS_Store files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=parse_json_array(data=DSGlobs))
+    WHERE Name = ".DS_Store"

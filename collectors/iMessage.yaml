@@ -1,0 +1,20 @@
+name: MacOS.Collection.iMessage
+description: |
+  Collect /iMessage chat.db from macOS endpoints.
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: ChatdbGlob
+  description: chat.db plus -wal/-shm sidecars (uncommitted writes live in WAL), plus attachments.
+  default: /Users/*/Library/Messages/chat.db,/Users/*/Library/Messages/chat.db-wal,/Users/*/Library/Messages/chat.db-shm,/Users/*/Library/Messages/Attachments/**
+
+sources:
+- name: Chatdb file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=ChatdbGlob, sep=","))

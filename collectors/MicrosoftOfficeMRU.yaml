@@ -1,0 +1,17 @@
+name: MacOS.Collection.MicrosoftOfficeMRU
+description: |
+  Collect recently accessed folders, applications, documents, hosts, and volumes on the system.
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: OfficeMRUGlob
+  default: /Users/*/Library/Containers/*/Data/Library/Preferences/*.securebookmarks.plist,/Users/*/Library/Containers/com.microsoft.*/Data/Library/Application Support/Microsoft/Office/*/spotlightindexer/AggregatedMRUSpotlightIndexedData.json
+
+sources:
+- name: OfficeMRU files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=OfficeMRUGlob, sep=","))

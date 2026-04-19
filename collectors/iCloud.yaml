@@ -1,0 +1,20 @@
+name: MacOS.Collection.iCloud
+description: |
+    Collect items stored in iCloud Drive
+ 
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: iCloudGlob
+  description: CloudDocs server.db/client.db plus -wal/-shm sidecars, SyncedPreferences plists, iCloud Accounts.
+  default: /Users/*/Library/Application Support/CloudDocs/session/db/server.db,/Users/*/Library/Application Support/CloudDocs/session/db/server.db-wal,/Users/*/Library/Application Support/CloudDocs/session/db/server.db-shm,/Users/*/Library/Application Support/CloudDocs/session/db/client.db,/Users/*/Library/Application Support/CloudDocs/session/db/client.db-wal,/Users/*/Library/Application Support/CloudDocs/session/db/client.db-shm,/Users/*/Library/SyncedPreferences/**,/Users/*/Library/Containers/*/Data/Library/SyncedPreferences/**,/Users/*/Library/Application Support/iCloud/Accounts/**
+
+sources:
+- name: iCloud Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=iCloudGlob, sep=","))

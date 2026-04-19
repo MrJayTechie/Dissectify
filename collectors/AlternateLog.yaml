@@ -1,0 +1,17 @@
+name: MacOS.Collection.AlternateLog
+description: |
+  Recursively find files under /var/log, Library/Logs, /etc/security logs and upload their contents.
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: VarLogGlob
+  default: /private/var/log/**,/Users/*/Library/Logs/**,/etc/security/**
+
+sources:
+- name: varlog Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=VarLogGlob, sep=","))

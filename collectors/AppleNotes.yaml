@@ -1,0 +1,20 @@
+name: MacOS.Collection.AppleNotes
+description: |
+  Collect AppleNotes from macOS
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: notesGlob
+  description: NoteStore.sqlite plus -wal/-shm sidecars (uncommitted writes live in WAL).
+  default: /Users/*/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite,/Users/*/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite-wal,/Users/*/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite-shm
+
+sources:
+- name: AppleNotes file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=notesGlob, sep=","))

@@ -1,0 +1,20 @@
+name: MacOS.Collection.Notifications
+description: |
+  Collect mac notification data for each user
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: notificationGlob
+  description: usernoted db2 plus -wal/-shm sidecars (uncommitted writes live in WAL).
+  default: /Users/*/Library/Group Containers/group.com.apple.usernoted/db2/db,/Users/*/Library/Group Containers/group.com.apple.usernoted/db2/db-wal,/Users/*/Library/Group Containers/group.com.apple.usernoted/db2/db-shm,/private/var/folders/*/*/*/com.apple.notificationcenter/db2/db,/private/var/folders/*/*/*/com.apple.notificationcenter/db2/db-wal,/private/var/folders/*/*/*/com.apple.notificationcenter/db2/db-shm
+
+sources:
+- name: notification file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=notificationGlob, sep=","))

@@ -1,0 +1,17 @@
+name: MacOS.Collection.LaunchPad
+description: |
+  Collect the launchpad database for every user
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: launchpadGlob
+  default: /private/var/folders/*/*/0/com.apple.dock.launchpad/db/**,/Users/*/Library/Application Support/com.apple.dock.launchpad/db/**
+
+sources:
+- name: launchpad files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=launchpadGlob, sep=","))

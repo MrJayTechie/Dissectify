@@ -1,0 +1,17 @@
+name: MacOS.Collection.SSHHost
+description: |
+  Collect known_hosts and authorized_keys
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: sshGlob
+  default: /Users/*/.ssh/known_hosts,/Users/*/.ssh/authorized_keys,/Users/*/%2Essh/known_hosts,/Users/*/%2Essh/authorized_keys
+
+sources:
+- name: ssh files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=sshGlob, sep=","))

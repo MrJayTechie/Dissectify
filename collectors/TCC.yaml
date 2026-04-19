@@ -1,0 +1,19 @@
+name: MacOS.Collection.TCC
+description: |
+  Find TCC DB files on macOS and upload the file contents.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: TCCGlob
+  description: TCC.db (system + per-user) plus -wal/-shm sidecars, plus locationd clients.plist.
+  default: /Library/Application Support/com.apple.TCC/TCC.db,/Library/Application Support/com.apple.TCC/TCC.db-wal,/Library/Application Support/com.apple.TCC/TCC.db-shm,/Users/*/Library/Application Support/com.apple.TCC/TCC.db,/Users/*/Library/Application Support/com.apple.TCC/TCC.db-wal,/Users/*/Library/Application Support/com.apple.TCC/TCC.db-shm,/private/var/db/locationd/clients.plist
+
+sources:
+- name: TCC DB files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=TCCGlob, sep=","))

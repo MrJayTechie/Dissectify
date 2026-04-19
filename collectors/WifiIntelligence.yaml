@@ -1,0 +1,20 @@
+name: MacOS.Collection.WifiIntelligence
+description: |
+    Collect Wifi connect/disconnect information from Apple Intelligence db
+ 
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: WifiIntelligenceGlob
+  description: views.db plus -wal/-shm sidecars (uncommitted writes live in WAL).
+  default: /Users/*/Library/IntelligencePlatform/Artifacts/internal/views.db,/Users/*/Library/IntelligencePlatform/Artifacts/internal/views.db-wal,/Users/*/Library/IntelligencePlatform/Artifacts/internal/views.db-shm
+
+sources:
+- name: WifiIntelligence Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=WifiIntelligenceGlob, sep=","))

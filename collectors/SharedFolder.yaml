@@ -1,0 +1,19 @@
+name: MacOS.Collection.SharedFolder
+description: |
+  Collect shared folder metadata info
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: SharedFolderGlob
+  default: /private/var/db/dslocal/nodes/Default/sharepoints/**,/private/var/db/com.apple.xpc.launchd/**,/Library/Preferences/com.apple.RemoteManagement.plist
+
+sources:
+- name: SharedFolder file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=SharedFolderGlob, sep=","))

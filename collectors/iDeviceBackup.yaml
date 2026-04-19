@@ -1,0 +1,19 @@
+name: MacOS.Collection.iDeviceBackup
+description: |
+    Collect iPhone/iPad backup databases
+ 
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: iDeviceBackupGlob
+  default: /Users/*/Library/Application Support/MobileSync/Backup/**
+
+sources:
+- name: iDeviceBackup Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=iDeviceBackupGlob, sep=","))

@@ -1,0 +1,19 @@
+name: MacOS.Collection.PrintJobs
+description: |
+  Collect CUPS spooled print jobs to get information about files/commands sent to a printer
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: printjobsGlob
+  default: /private/var/spool/cups/**,/etc/cups/ppd/*.ppd
+
+sources:
+- name: printjob file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=printjobsGlob, sep=","))

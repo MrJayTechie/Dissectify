@@ -1,0 +1,20 @@
+name: MacOS.Collection.Interactions
+description: |
+  Collect user who is communicating with using applications such as Messages, Mail, and Phone.
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: InteractionsGlob
+  description: interactionC.db plus -wal/-shm sidecars (uncommitted writes live in WAL).
+  default: /private/var/db/CoreDuet/People/interactionC.db,/private/var/db/CoreDuet/People/interactionC.db-wal,/private/var/db/CoreDuet/People/interactionC.db-shm
+
+sources:
+- name: Interactions file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=InteractionsGlob, sep=","))

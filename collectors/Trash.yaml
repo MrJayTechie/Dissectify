@@ -1,0 +1,18 @@
+name: MacOS.Collection.Trash
+description: |
+  Find files in users' .Trash folders on macOS and upload the file contents.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: TrashGlob
+  default: /Users/*/.Trash/**,/Users/*/%2ETrash/**,/Users/*/Library/Mobile Documents/.Trash/**,/Users/*/Library/Mobile Documents/%2ETrash/**
+
+sources:
+- name: Trash files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=TrashGlob, sep=","))

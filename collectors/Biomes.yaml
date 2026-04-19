@@ -1,0 +1,19 @@
+name: MacOS.Collection.Biomes
+description: |
+ Items that were once stored in knowledgeC.db are now in Biome files. 
+ 
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: BiomeGlobs
+  default: /Users/*/Library/Biome/**,/private/var/db/biome/**
+
+sources:
+- name: Biome Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=BiomeGlobs, sep=","))

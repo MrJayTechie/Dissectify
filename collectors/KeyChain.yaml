@@ -1,0 +1,17 @@
+name: MacOS.Collection.KeyChain
+description: |
+  Recursively find files under /Users/*/Library/Keychains/* and upload their contents.
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: KeychainsGlobs
+  default: /Users/*/Library/Keychains/**,/private/var/db/SystemKey,/Library/Keychains/System.keychain
+
+sources:
+- name: Keychains files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+       FROM glob(globs=split(string=KeychainsGlobs, sep=","))

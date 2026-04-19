@@ -1,0 +1,19 @@
+name: MacOS.Collection.SavedState
+description: |
+  Collect the saved application state created on macOS
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: SavedStateGlob   
+  default: /Users/*/Library/Saved Application State/**,/Users/*/Library/Daemon Containers/*/Data/Library/Saved Application State/**
+
+sources:
+- name: SavedState file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=SavedStateGlob, sep=","))

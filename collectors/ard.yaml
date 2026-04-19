@@ -1,0 +1,19 @@
+name: MacOS.Collection.ard
+description: |
+  Collect ARD (Apple Remote Desktop) cached databases about app usage
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: ardGlob
+  default: /private/var/db/RemoteManagement/caches/AppUsage.tmp,/private/var/db/RemoteManagement/caches/AppUsage.plist,/private/var/db/RemoteManagement/caches/UserAcct.tmp
+
+sources:
+- name: ard file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=ardGlob, sep=","))

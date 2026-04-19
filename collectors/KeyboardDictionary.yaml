@@ -1,0 +1,19 @@
+name: MacOS.Collection.KeyboardDictionary
+description: |
+  Collect keywords that have been typed by the user used for autocorrect and predictions
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: KeyboardDictionaryGlob
+  default: /Users/*/Library/Spelling/**
+
+sources:
+- name: KeyboardDictionary file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=KeyboardDictionaryGlob, sep=","))

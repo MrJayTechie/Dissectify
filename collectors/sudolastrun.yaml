@@ -1,0 +1,19 @@
+name: MacOS.Collection.sudolastrun
+description: |
+  Collects last time sudo was used and a few other times earlier (if available)
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: sudolastrunGlob
+  default: /private/var/db/sudo/ts/**
+
+sources:
+- name: sudolastrun file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=sudolastrunGlob, sep=","))

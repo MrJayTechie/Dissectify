@@ -1,0 +1,17 @@
+name: MacOS.Collection.etcFolder
+description: |
+  Collects etc folder 
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: etcGlob
+  default: /private/etc/**
+
+sources:
+- name: etc files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=etcGlob, sep=","))

@@ -1,0 +1,17 @@
+name: MacOS.Collection.AppleMail
+description: |
+  Recursively find files under /Users/*/Library/Mail/ and upload their contents.
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: AppleMailGlob
+  default: /Users/*/Library/Mail/**
+
+sources:
+- name: AppleMail files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=AppleMailGlob, sep=","))

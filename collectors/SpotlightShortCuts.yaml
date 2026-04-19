@@ -1,0 +1,20 @@
+name: MacOS.Collection.SpotlightShortCuts
+description: |
+  Collect User typed data in the spotlight bar & targeted document/app
+
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: SpotlightShortCutsGlob
+  default: /Users/*/Library/Application Support/com.apple.spotlight/com.apple.spotlight.Shortcuts,/Users/*/Library/Application Support/com.apple.spotlight/com.apple.spotlight.Shortcuts.v3,/Users/*/Library/Group Containers/group.com.apple.spotlight/com.apple.spotlight.Shortcuts.v3,/Users/*/Library/Metadata/CoreSpotlight/index.spotlightV3/**
+
+sources:
+- name: SpotlightShortCuts file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=SpotlightShortCutsGlob, sep=","))
+    

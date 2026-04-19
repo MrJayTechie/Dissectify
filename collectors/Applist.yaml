@@ -1,0 +1,19 @@
+name: MacOS.Collection.Applist
+description: |
+  Collect apps & printers installed and/or available for each user from appList.dat
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: AppListGlob
+  default: /Users/*/Library/Application Support/com.apple.spotlight/appList.dat
+
+sources:
+- name: AppList file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=AppListGlob, sep=","))

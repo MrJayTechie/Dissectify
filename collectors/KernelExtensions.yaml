@@ -1,0 +1,17 @@
+name: MacOS.Collection.KernelExtensions
+description: |
+  Collect kernel modules used as device drivers and network filters.
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: KernelExtensionsGlob
+  default: /private/var/db/loadedkextmt.plist,/private/var/db/SystemPolicyConfiguration/KextPolicy,/private/var/db/SystemPolicyConfiguration/ExecPolicy,/Library/Apple/System/Library/Extensions/**,/System/Library/Extensions/**,/Library/Extensions/**,/Library/StagedExtensions/**,/Library/SystemExtensions/**
+  
+sources:
+- name: KernelExtensions files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=KernelExtensionsGlob, sep=","))

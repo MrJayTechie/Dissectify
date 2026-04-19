@@ -1,0 +1,19 @@
+name: MacOS.Collection.InternetAccounts
+description: |
+  Collect configured internet accounts (iCloud, Google, Linkedin, facebook..)
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: InternetAccountsGlob
+  default: /Users/*/Library/Accounts/**
+
+sources:
+- name: InternetAccounts file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=InternetAccountsGlob, sep=","))

@@ -1,0 +1,23 @@
+name: MacOS.Collection.FirewallConfiguration
+description: |
+  Collect FirewallConfiguration
+  
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: FirewallConfigurationGlob
+  description: |
+    PF and ALF firewall configuration. On macOS 15 the ALF plist moved from
+    /Library/Preferences/com.apple.alf.plist to /usr/libexec/ApplicationFirewall/.
+    Both paths are included for cross-version compatibility, plus the PF
+    anchor directory which contains the actual ruleset on modern systems.
+  default: /etc/pf.conf,/private/etc/pf.conf,/etc/pf.anchors/**,/private/etc/pf.anchors/**,/usr/libexec/ApplicationFirewall/com.apple.alf.plist,/Library/Preferences/com.apple.alf.plist
+sources:
+- name: FirewallConfiguration file
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=FirewallConfigurationGlob, sep=","))

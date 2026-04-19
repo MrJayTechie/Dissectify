@@ -1,0 +1,17 @@
+name: MacOS.Collection.Applications
+description: |
+   Enumerate applications in /Applications, parse each app's Contents/Info.plist and optionally upload
+author: Ali Jammal
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: ApplicationGlob
+  default: /Users/*/Applications/*/Contents/Info.plist, /Applications/*/Contents/Info.plist
+
+sources:
+- name: Application Files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=ApplicationGlob, sep=", ")) 
