@@ -154,14 +154,3 @@ The health check validates a Velociraptor macOS collection by checking:
 All dependencies are installed automatically.
 
 ---
-
-## Author
-
-**Ali Jammal**
-DFIR Professional | macOS Forensics
-
----
-
-## License
-
-MIT
