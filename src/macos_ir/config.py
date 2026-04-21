@@ -16,6 +16,8 @@ PLUGINS_REPO = "https://github.com/MrJayTechie/Dissect-MacOS-Plugins.git"
 PLUGINS_SUBDIR = "Plugins"
 COLLECTORS_REPO = "https://github.com/MrJayTechie/MacOS-Velociraptor-Collectors.git"
 COLLECTORS_SUBDIR = "Collectors"
+SHELL_SUBDIR = "shell"
+SHELL_SCRIPT_NAME = "collect_macos.sh"
 
 
 def _find_project_root() -> Path:
@@ -32,6 +34,7 @@ def _find_project_root() -> Path:
 PROJECT_ROOT = _find_project_root()
 PLUGINS_DIR = PROJECT_ROOT / "plugins"
 COLLECTORS_DIR = PROJECT_ROOT / "collectors"
+SHELL_COLLECTOR = PROJECT_ROOT / SHELL_SCRIPT_NAME
 
 
 def _ensure_dir() -> None:
@@ -69,8 +72,18 @@ def get_collector_path() -> str | None:
 
 # ── GitHub update helpers ──
 
-def _clone_and_sync(repo_url: str, subdir: str, target: Path, glob: str) -> tuple[str | None, str | None]:
-    """Clone a repo, copy matching files from subdir into target, return (path, error)."""
+def _clone_and_sync(
+    repo_url: str,
+    subdir: str,
+    target: Path,
+    glob: str,
+    extra_files: list[tuple[str, Path]] | None = None,
+) -> tuple[str | None, str | None]:
+    """Clone a repo, copy matching files from subdir into target, return (path, error).
+
+    extra_files: optional list of (source_relative_to_repo_root, absolute_destination)
+                 tuples — additional files copied outside the main glob sync.
+    """
     _ensure_dir()
     tmp = CONFIG_DIR / "_update_tmp"
 
@@ -100,6 +113,14 @@ def _clone_and_sync(repo_url: str, subdir: str, target: Path, glob: str) -> tupl
         for f in source.glob(glob):
             shutil.copy2(f, target / f.name)
 
+        if extra_files:
+            for src_rel, dest_abs in extra_files:
+                src = tmp / src_rel
+                if src.exists():
+                    dest_abs.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dest_abs)
+                    dest_abs.chmod(0o755)
+
         return str(target), None
 
     except FileNotFoundError:
@@ -119,8 +140,21 @@ def update_plugins() -> tuple[str | None, str | None]:
 
 
 def update_collectors() -> tuple[str | None, str | None]:
-    """Pull latest YAML collectors from GitHub into collectors/."""
-    return _clone_and_sync(COLLECTORS_REPO, COLLECTORS_SUBDIR, COLLECTORS_DIR, "*.yaml")
+    """Pull latest YAML collectors from GitHub into collectors/ and the shell collector into PROJECT_ROOT."""
+    return _clone_and_sync(
+        COLLECTORS_REPO,
+        COLLECTORS_SUBDIR,
+        COLLECTORS_DIR,
+        "*.yaml",
+        extra_files=[(f"{SHELL_SUBDIR}/{SHELL_SCRIPT_NAME}", SHELL_COLLECTOR)],
+    )
+
+
+def get_shell_collector() -> str | None:
+    """Return path to the cached shell collector script, or None if not yet pulled."""
+    if SHELL_COLLECTOR.is_file():
+        return str(SHELL_COLLECTOR)
+    return None
 
 
 # ── Velociraptor binary download ──

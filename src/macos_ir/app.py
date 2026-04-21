@@ -31,8 +31,9 @@ from textual.widgets import (
 from macos_ir.config import (
     update_plugins, update_collectors, download_velociraptor, build_collector,
     get_plugin_path, get_collector_path, get_velo_binaries, get_run_command,
+    get_shell_collector,
     load_config, save_config,
-    COLLECTORS_DIR, PLUGINS_DIR, VELO_DIR, BUILD_DIR, COLLECTED_DIR,
+    COLLECTORS_DIR, PLUGINS_DIR, VELO_DIR, BUILD_DIR, COLLECTED_DIR, SHELL_COLLECTOR,
 )
 from macos_ir.health import CollectionHealth, MISSING_REASONS
 from macos_ir.plugins import get_selected_functions
@@ -398,6 +399,7 @@ class MacOSIRApp(App):
         with Horizontal(id="button-bar-2"):
             yield Button("Build Intel", id="btn-build-amd64", variant="success")
             yield Button("Build Apple Silicon", id="btn-build-arm64", variant="success")
+            yield Button("Shell Collector", id="btn-shell", variant="success")
             yield Button("Collector Guide", id="btn-guide", variant="default")
             yield Button("Copy Commands", id="btn-copy", variant="default")
 
@@ -483,6 +485,8 @@ class MacOSIRApp(App):
             self._do_build_collector("amd64")
         elif event.button.id == "btn-build-arm64":
             self._do_build_collector("arm64")
+        elif event.button.id == "btn-shell":
+            self._show_shell_collector()
         elif event.button.id == "btn-guide":
             self._show_collector_guide()
         elif event.button.id == "btn-copy":
@@ -542,9 +546,10 @@ class MacOSIRApp(App):
             self.call_from_thread(self.notify, f"Collector update error: {err}", severity="error")
         if path:
             count = len(list(COLLECTORS_DIR.glob("*.yaml")))
-            self.call_from_thread(log.write, f"  [green]Updated: {count} YAML collectors[/]")
-            self.call_from_thread(self._set_status, f"Collectors updated: {count} YAML files")
-            self.call_from_thread(self.notify, f"Collectors updated: {count} YAML files", severity="information")
+            shell_msg = " + shell collector" if SHELL_COLLECTOR.is_file() else ""
+            self.call_from_thread(log.write, f"  [green]Updated: {count} YAML collectors{shell_msg}[/]")
+            self.call_from_thread(self._set_status, f"Collectors updated: {count} YAML files{shell_msg}")
+            self.call_from_thread(self.notify, f"Collectors updated: {count} YAML files{shell_msg}", severity="information")
         else:
             self.call_from_thread(self._set_status, f"Collector update failed: {err}")
 
@@ -721,6 +726,60 @@ class MacOSIRApp(App):
             proc.communicate(text.encode())
             self.notify("Commands copied to clipboard", severity="information")
             self._set_status("Commands copied to clipboard")
+        except Exception as e:
+            self.notify(f"Copy failed: {e}", severity="error")
+
+    # ── Shell collector ──
+
+    def _show_shell_collector(self) -> None:
+        """Show the shell collector instructions and copy the run command to clipboard."""
+        tabs = self.query_one("#results-tabs", TabbedContent)
+        tabs.add_class("visible")
+        tabs.active = "tab-collector"
+
+        log = self.query_one("#collector-log", RichLog)
+        log.clear()
+
+        script = get_shell_collector()
+        log.write("[bold cyan]Shell Collector (collect_macos.sh)[/]\n")
+
+        if not script:
+            log.write("[yellow]Shell collector not found locally.[/]")
+            log.write("Click [bold]Update Collectors[/] in Step 1 to pull the script from GitHub.")
+            log.write(f"Expected location: [dim]{SHELL_COLLECTOR}[/]\n")
+            self._set_status("Shell collector not cached — click 'Update Collectors' first")
+            return
+
+        out_dir = f"/tmp/collection-$(hostname -s)-$(date -u +%Y%m%dT%H%M%SZ)"
+        run_cmd = f"sudo {script} {out_dir}"
+
+        log.write(f"[bold]Script:[/]      {script}")
+        log.write(f"[bold]Output:[/]      {out_dir}\n")
+
+        log.write("[bold]Use when:[/] Velociraptor is blocked by MDM/notarization policy.")
+        log.write("Shell scripts run through Apple-signed /bin/zsh, so Gatekeeper does not evaluate them.\n")
+
+        log.write("[bold]Step 1 — Grant Full Disk Access[/]")
+        log.write("  System Settings > Privacy & Security > Full Disk Access > add Terminal.app")
+        log.write("  Without FDA, Mail / Messages / Safari / TCC / keychains will be empty.\n")
+
+        log.write("[bold]Step 2 — Run the collector (copied to clipboard)[/]")
+        log.write(f"  [green]{run_cmd}[/]\n")
+
+        log.write("[bold]Step 3 — After it finishes[/]")
+        log.write("  A .zip archive is created next to the output directory with a .sha256 sidecar.")
+        log.write("  Extract the zip, then point [bold]Collection[/] (top of this screen) at the inner")
+        log.write("  [cyan]filesystem/[/] directory and click Health Check.\n")
+
+        log.write("[bold yellow]EDR/SOC note:[/]")
+        log.write("  The script reads keychains, TCC.db, browser login data, iMessage chat.db.")
+        log.write("  On hosts with behavioral EDR, coordinate with the SOC before running.\n")
+
+        try:
+            proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
+            proc.communicate(run_cmd.encode())
+            self.notify("Shell collector command copied to clipboard", severity="information")
+            self._set_status("Shell collector command copied — paste in Terminal with FDA granted")
         except Exception as e:
             self.notify(f"Copy failed: {e}", severity="error")
 

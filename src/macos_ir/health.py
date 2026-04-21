@@ -673,15 +673,20 @@ class CollectionHealth:
 
     def _find_uploads_auto(self) -> Path:
         p = self.collection_dir
+        # Velociraptor layout: <root>/uploads/auto/
         if (p / "uploads" / "auto").is_dir():
             return p / "uploads" / "auto"
-        if p.name == "auto" and (p / "Users").is_dir():
-            self.collection_dir = p.parent.parent
+        # Shell-script collector layout: <root>/filesystem/
+        if (p / "filesystem").is_dir():
+            return p / "filesystem"
+        # Caller pointed directly at the inner root
+        if p.name in ("auto", "filesystem") and (p / "Users").is_dir():
+            self.collection_dir = p.parent.parent if p.name == "auto" else p.parent
             return p
         if (p / "auto").is_dir():
             self.collection_dir = p.parent
             return p / "auto"
-        raise FileNotFoundError(f"Cannot find uploads/auto/ under {p}")
+        raise FileNotFoundError(f"Cannot find uploads/auto/ or filesystem/ under {p}")
 
     def discover_users(self) -> list[str]:
         users_dir = self.uploads_auto / "Users"
