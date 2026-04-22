@@ -467,6 +467,30 @@ class MacOSIRApp(App):
             else:
                 self._set_status("No plugins found — click 'Update Plugins' to download from GitHub")
 
+        # Restore prior-session working state:
+        # if the saved Output XLSX path points at an actual file, treat it as
+        # our "current" workbook so Open XLSX and Search work without having
+        # to regenerate.
+        output_value = self.query_one("#output-input", Input).value.strip()
+        if output_value:
+            candidate = Path(output_value).expanduser()
+            if candidate.is_file():
+                self._xlsx_path = str(candidate)
+                self._set_btn("btn-open", False)
+                try:
+                    size_mb = candidate.stat().st_size / (1 << 20)
+                    self._set_status(
+                        f"Restored last workbook: {candidate.name} ({size_mb:.1f} MB) — Open XLSX and Search are available."
+                    )
+                except Exception:
+                    pass
+
+        # If collection + plugin paths are both set, enable Generate so the
+        # user can re-run without first clicking Health Check.
+        collection_value = self.query_one("#collection-input", Input).value.strip()
+        if collection_value and plugin_input.value.strip():
+            self._set_btn("btn-generate", False)
+
         # Render the guide overview eagerly so the Guide tab is populated on first view
         try:
             self._render_guide_overview()
