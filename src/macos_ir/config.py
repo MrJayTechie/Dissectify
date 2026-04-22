@@ -16,6 +16,7 @@ PLUGINS_REPO = "https://github.com/MrJayTechie/Dissect-MacOS-Plugins.git"
 PLUGINS_SUBDIR = "Plugins"
 COLLECTORS_REPO = "https://github.com/MrJayTechie/MacOS-Velociraptor-Collectors.git"
 COLLECTORS_SUBDIR = "Collectors"
+LIVE_COLLECTORS_SUBDIR = "Collectors/Live"
 SHELL_SUBDIR = "shell"
 SHELL_SCRIPT_NAME = "collect_macos.sh"
 
@@ -34,6 +35,7 @@ def _find_project_root() -> Path:
 PROJECT_ROOT = _find_project_root()
 PLUGINS_DIR = PROJECT_ROOT / "plugins"
 COLLECTORS_DIR = PROJECT_ROOT / "collectors"
+LIVE_COLLECTORS_DIR = PROJECT_ROOT / "collectors_live"
 SHELL_COLLECTOR = PROJECT_ROOT / SHELL_SCRIPT_NAME
 
 
@@ -78,11 +80,15 @@ def _clone_and_sync(
     target: Path,
     glob: str,
     extra_files: list[tuple[str, Path]] | None = None,
+    extra_syncs: list[tuple[str, Path, str]] | None = None,
 ) -> tuple[str | None, str | None]:
     """Clone a repo, copy matching files from subdir into target, return (path, error).
 
     extra_files: optional list of (source_relative_to_repo_root, absolute_destination)
-                 tuples — additional files copied outside the main glob sync.
+                 tuples — additional single files copied outside the main glob sync.
+    extra_syncs: optional list of (source_subdir, target_dir, glob) tuples — additional
+                 glob-based sync passes using the same clone. Missing source subdirs
+                 are silently skipped (subdir may not yet exist in the remote repo).
     """
     _ensure_dir()
     tmp = CONFIG_DIR / "_update_tmp"
@@ -121,6 +127,19 @@ def _clone_and_sync(
                     shutil.copy2(src, dest_abs)
                     dest_abs.chmod(0o755)
 
+        if extra_syncs:
+            for src_subdir, dest_dir, dest_glob in extra_syncs:
+                src_dir = tmp / src_subdir
+                if not src_dir.is_dir():
+                    continue
+                if dest_dir.exists():
+                    for f in dest_dir.glob(dest_glob):
+                        f.unlink()
+                else:
+                    dest_dir.mkdir(parents=True)
+                for f in src_dir.glob(dest_glob):
+                    shutil.copy2(f, dest_dir / f.name)
+
         return str(target), None
 
     except FileNotFoundError:
@@ -140,13 +159,15 @@ def update_plugins() -> tuple[str | None, str | None]:
 
 
 def update_collectors() -> tuple[str | None, str | None]:
-    """Pull latest YAML collectors from GitHub into collectors/ and the shell collector into PROJECT_ROOT."""
+    """Pull from the collectors repo in one clone: offline YAMLs into collectors/,
+    live YAMLs into collectors_live/, shell collector into PROJECT_ROOT."""
     return _clone_and_sync(
         COLLECTORS_REPO,
         COLLECTORS_SUBDIR,
         COLLECTORS_DIR,
         "*.yaml",
         extra_files=[(f"{SHELL_SUBDIR}/{SHELL_SCRIPT_NAME}", SHELL_COLLECTOR)],
+        extra_syncs=[(LIVE_COLLECTORS_SUBDIR, LIVE_COLLECTORS_DIR, "*.yaml")],
     )
 
 
@@ -154,6 +175,13 @@ def get_shell_collector() -> str | None:
     """Return path to the cached shell collector script, or None if not yet pulled."""
     if SHELL_COLLECTOR.is_file():
         return str(SHELL_COLLECTOR)
+    return None
+
+
+def get_live_collector_path() -> str | None:
+    """Return path to the live collectors directory if populated."""
+    if LIVE_COLLECTORS_DIR.is_dir() and any(LIVE_COLLECTORS_DIR.glob("*.yaml")):
+        return str(LIVE_COLLECTORS_DIR)
     return None
 
 
@@ -326,6 +354,44 @@ def _generate_spec() -> Path:
     return spec
 
 
+def _generate_live_spec() -> Path:
+    """Auto-generate live_spec.yaml from YAML files in collectors_live/."""
+    spec = LIVE_COLLECTORS_DIR / "spec.yaml"
+    yamls = sorted([f.stem for f in LIVE_COLLECTORS_DIR.glob("*.yaml") if f.stem != "spec"])
+
+    lines = ["OS: Generic", "Artifacts:"]
+    for name in yamls:
+        lines.append(f"  MacOS.Live.{name}: {{}}")
+
+    output_dir = "/tmp"
+    lines.extend([
+        "Target: ZIP",
+        "EncryptionScheme: None",
+        "EncryptionArgs:",
+        '  public_key: ""',
+        '  password: ""',
+        "OptVerbose: true",
+        "OptBanner: true",
+        "OptPrompt: false",
+        "OptAdmin: true",
+        "OptTempdir: /tmp",
+        "OptLevel: 5",
+        "OptConcurrency: 4",
+        "OptFormat: jsonl",
+        f"OptOutputDirectory: {output_dir}",
+        "OptFilenameTemplate: Live-%Hostname%-%TIMESTAMP%",
+        'OptCollectorFilename: ""',
+        "OptCpuLimit: 0",
+        "OptProgressTimeout: 900",
+        "OptTimeout: 0",
+        "OptDeleteAtExit: false",
+        "",
+    ])
+
+    spec.write_text("\n".join(lines))
+    return spec
+
+
 def _get_local_arch() -> str:
     """Return 'arm64' or 'amd64' for the current Mac."""
     machine = platform.machine().lower()
@@ -471,6 +537,17 @@ def get_collector_binary() -> str | None:
     return None
 
 
+def get_live_collector_binary() -> str | None:
+    """Return the path to the built live collector matching this Mac's arch."""
+    local = _get_local_arch()
+    collector = BUILD_DIR / f"Collector-Live-darwin-{local}"
+    if collector.exists():
+        return str(collector)
+    for f in BUILD_DIR.glob("Collector-Live-darwin-*"):
+        return str(f)
+    return None
+
+
 def get_run_command() -> tuple[str | None, str | None]:
     """Return (command, error) for running the collector with sudo."""
     collector = get_collector_binary()
@@ -478,3 +555,121 @@ def get_run_command() -> tuple[str | None, str | None]:
         return None, "No collector built yet — click 'Build Intel' or 'Build Apple Silicon' first"
     COLLECTED_DIR.mkdir(parents=True, exist_ok=True)
     return collector, None
+
+
+def build_live_collector(arch: str | None = None, progress_cb=None) -> tuple[list[str], list[str]]:
+    """Build a live-response collector from YAML files in collectors_live/.
+
+    Mirrors build_collector() but uses LIVE_COLLECTORS_DIR, the MacOS.Live.* artifact
+    namespace, and outputs Collector-Live-darwin-<arch> so offline and live builds
+    coexist in BUILD_DIR.
+
+    Returns (built_paths, errors).
+    """
+    yamls = list(LIVE_COLLECTORS_DIR.glob("*.yaml")) if LIVE_COLLECTORS_DIR.is_dir() else []
+    artifact_yamls = [y for y in yamls if y.stem != "spec"]
+    if not artifact_yamls:
+        return [], [
+            "No live YAML artifacts found in collectors_live/ — "
+            "click 'Update Collectors' first to pull them from GitHub"
+        ]
+
+    if progress_cb:
+        progress_cb(f"Generating live spec.yaml from {len(artifact_yamls)} artifacts...")
+    spec = _generate_live_spec()
+
+    binaries = get_velo_binaries()
+    if not binaries:
+        return [], ["No velociraptor binaries found — click 'Download Velociraptor' first"]
+
+    if arch:
+        binaries = [b for b in binaries if _binary_arch(b) == arch]
+        if not binaries:
+            return [], [f"No {arch} binary found — download it first"]
+
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    local_arch = _get_local_arch()
+
+    built = []
+    errors = []
+
+    for binary in binaries:
+        b_arch = _binary_arch(binary)
+        is_native = b_arch == local_arch
+        output = BUILD_DIR / f"Collector-Live-darwin-{b_arch}"
+
+        if progress_cb:
+            label = f"{b_arch} (native)" if is_native else f"{b_arch} (cross-arch)"
+            progress_cb(f"Building live collector for {label}...")
+
+        try:
+            result = subprocess.run(
+                [
+                    str(binary),
+                    "--definitions", str(LIVE_COLLECTORS_DIR),
+                    "collector", str(spec),
+                ],
+                capture_output=True, text=True, timeout=120,
+            )
+
+            if result.returncode != 0:
+                stderr_lines = result.stderr.strip().splitlines()
+                error_lines = [l for l in stderr_lines if "[ERROR]" in l or "error:" in l.lower()]
+                err_msg = error_lines[-1] if error_lines else (stderr_lines[-1] if stderr_lines else f"exit {result.returncode}")
+                err_msg = err_msg[:200]
+                if "bad CPU type" in result.stderr.lower() or "bad cpu" in result.stderr.lower():
+                    if b_arch == "amd64":
+                        errors.append(
+                            f"{b_arch}: Cannot run Intel binary on this Mac. "
+                            "Install Rosetta (softwareupdate --install-rosetta)."
+                        )
+                    else:
+                        errors.append(f"{b_arch}: Cannot run ARM binary on Intel Mac.")
+                else:
+                    errors.append(f"{b_arch}: {err_msg}")
+            else:
+                collector_path = None
+                try:
+                    stdout = result.stdout.strip()
+                    if stdout:
+                        data = json.loads(stdout)
+                        if isinstance(data, list) and data:
+                            repacked = data[0].get("Repacked", {})
+                            collector_path = repacked.get("Path")
+                except Exception:
+                    pass
+
+                if collector_path and Path(collector_path).exists():
+                    Path(collector_path).chmod(0o755)
+                    shutil.move(collector_path, str(output))
+                    built.append(str(output))
+                else:
+                    for search in [
+                        Path.home() / "gui_datastore",
+                        Path("/var/folders"),
+                    ]:
+                        found = list(search.rglob("Collector_*")) if search.exists() else []
+                        if found:
+                            src = max(found, key=lambda f: f.stat().st_mtime)
+                            src.chmod(0o755)
+                            shutil.move(str(src), str(output))
+                            built.append(str(output))
+                            break
+                    else:
+                        errors.append(f"{b_arch}: Build ran but collector file not found")
+
+        except OSError as e:
+            if "bad CPU type" in str(e).lower() or e.errno == 86:
+                if b_arch == "amd64":
+                    errors.append(
+                        f"{b_arch}: Cannot run Intel binary on this Mac. "
+                        "Install Rosetta: softwareupdate --install-rosetta"
+                    )
+                else:
+                    errors.append(f"{b_arch}: Cannot run ARM binary on Intel Mac.")
+            else:
+                errors.append(f"{b_arch}: {e}")
+        except Exception as e:
+            errors.append(f"{b_arch}: {e}")
+
+    return built, errors

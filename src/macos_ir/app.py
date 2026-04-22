@@ -30,10 +30,12 @@ from textual.widgets import (
 
 from macos_ir.config import (
     update_plugins, update_collectors, download_velociraptor, build_collector,
+    build_live_collector,
     get_plugin_path, get_collector_path, get_velo_binaries, get_run_command,
-    get_shell_collector,
+    get_shell_collector, get_live_collector_binary,
     load_config, save_config,
-    COLLECTORS_DIR, PLUGINS_DIR, VELO_DIR, BUILD_DIR, COLLECTED_DIR, SHELL_COLLECTOR,
+    COLLECTORS_DIR, LIVE_COLLECTORS_DIR, PLUGINS_DIR, VELO_DIR, BUILD_DIR,
+    COLLECTED_DIR, SHELL_COLLECTOR,
 )
 from macos_ir.health import CollectionHealth, MISSING_REASONS
 from macos_ir.plugins import get_selected_functions
@@ -399,6 +401,7 @@ class MacOSIRApp(App):
         with Horizontal(id="button-bar-2"):
             yield Button("Build Intel", id="btn-build-amd64", variant="success")
             yield Button("Build Apple Silicon", id="btn-build-arm64", variant="success")
+            yield Button("Build Live", id="btn-build-live", variant="success")
             yield Button("Shell Collector", id="btn-shell", variant="success")
             yield Button("Collector Guide", id="btn-guide", variant="default")
             yield Button("Copy Commands", id="btn-copy", variant="default")
@@ -485,6 +488,8 @@ class MacOSIRApp(App):
             self._do_build_collector("amd64")
         elif event.button.id == "btn-build-arm64":
             self._do_build_collector("arm64")
+        elif event.button.id == "btn-build-live":
+            self._do_build_live_collector()
         elif event.button.id == "btn-shell":
             self._show_shell_collector()
         elif event.button.id == "btn-guide":
@@ -546,10 +551,12 @@ class MacOSIRApp(App):
             self.call_from_thread(self.notify, f"Collector update error: {err}", severity="error")
         if path:
             count = len(list(COLLECTORS_DIR.glob("*.yaml")))
-            shell_msg = " + shell collector" if SHELL_COLLECTOR.is_file() else ""
-            self.call_from_thread(log.write, f"  [green]Updated: {count} YAML collectors{shell_msg}[/]")
-            self.call_from_thread(self._set_status, f"Collectors updated: {count} YAML files{shell_msg}")
-            self.call_from_thread(self.notify, f"Collectors updated: {count} YAML files{shell_msg}", severity="information")
+            live_count = len(list(LIVE_COLLECTORS_DIR.glob("*.yaml"))) if LIVE_COLLECTORS_DIR.is_dir() else 0
+            live_msg = f" + {live_count} live" if live_count else ""
+            shell_msg = " + shell" if SHELL_COLLECTOR.is_file() else ""
+            self.call_from_thread(log.write, f"  [green]Updated: {count} offline YAMLs{live_msg}{shell_msg}[/]")
+            self.call_from_thread(self._set_status, f"Collectors updated: {count}{live_msg}{shell_msg}")
+            self.call_from_thread(self.notify, f"Collectors updated: {count}{live_msg}{shell_msg}", severity="information")
         else:
             self.call_from_thread(self._set_status, f"Collector update failed: {err}")
 
@@ -689,6 +696,79 @@ class MacOSIRApp(App):
             setattr, self.query_one("#results-tabs", TabbedContent), "active", "tab-collector"
         )
 
+    # ── Build live collector ──
+
+    @work(thread=True, exclusive=True)
+    def _do_build_live_collector(self) -> None:
+        btn_id = "btn-build-live"
+
+        self.call_from_thread(self._set_status, "Building Live collector (native arch)...")
+        self.call_from_thread(self._set_btn, btn_id, True)
+
+        self.call_from_thread(self.query_one("#results-tabs", TabbedContent).add_class, "visible")
+        log = self.query_one("#collector-log", RichLog)
+        self.call_from_thread(log.clear)
+        self.call_from_thread(log.write, "[bold cyan]Building Live Collector[/]\n")
+
+        def _progress(msg):
+            self.call_from_thread(log.write, f"  [dim]{msg}[/]")
+            self.call_from_thread(self._set_status, msg)
+
+        import platform
+        local_arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "amd64"
+
+        built, errors = build_live_collector(arch=local_arch, progress_cb=_progress)
+
+        if built:
+            collector_path = built[0]
+            velo_bins = get_velo_binaries()
+            velo_bin = next((b for b in velo_bins if local_arch in b.name), None)
+            velo_name = velo_bin.name if velo_bin else f"velociraptor-darwin-{local_arch}"
+
+            self.call_from_thread(log.write, "")
+            self.call_from_thread(log.write, "[bold green]Live collector built:[/]")
+            self.call_from_thread(log.write, f"  [green]{collector_path}[/]")
+            self.call_from_thread(log.write, "")
+
+            yaml_count = len(list(LIVE_COLLECTORS_DIR.glob("*.yaml"))) - 1  # exclude spec.yaml
+            self.call_from_thread(log.write, f"[bold]Contains:[/] {yaml_count} MacOS.Live.* artifacts\n")
+
+            self.call_from_thread(log.write, "[bold]Run on the target Mac (fast triage, 30–90 s):[/]")
+            self.call_from_thread(
+                log.write,
+                f"  [green]sudo ./{velo_name} -- --embedded_config {collector_path}[/]"
+            )
+            self.call_from_thread(log.write, "")
+            self.call_from_thread(
+                log.write,
+                "  [dim]Captures: ps, lsof, netstat, kextstat, launchctl, spctl, csrutil, fdesetup, "
+                "profiles, codesign, pkgutil, mount, pmset, system_profiler (hardware/usb), log stats.[/]"
+            )
+            self.call_from_thread(log.write, "")
+            self.call_from_thread(log.write, "[bold]Extract the live collection like an offline one:[/]")
+            self.call_from_thread(log.write, "  [green]ditto -xk Live-<host>-<ts>.zip /path/to/output[/]")
+            self.call_from_thread(
+                self._set_status,
+                f"Live collector built: {Path(collector_path).name}"
+            )
+            self.call_from_thread(
+                self.notify,
+                "Live collector built in builds/",
+                severity="information",
+            )
+
+        for e in errors:
+            self.call_from_thread(log.write, f"\n  [red]ERROR: {e}[/]")
+
+        if not built and errors:
+            self.call_from_thread(self._set_status, f"Live build failed: {errors[0]}")
+            self.call_from_thread(self.notify, f"Live build failed: {errors[0]}", severity="error")
+
+        self.call_from_thread(self._set_btn, btn_id, False)
+        self.call_from_thread(
+            setattr, self.query_one("#results-tabs", TabbedContent), "active", "tab-collector"
+        )
+
     # ── Copy commands to clipboard ──
 
     def _copy_commands(self) -> None:
@@ -700,16 +780,25 @@ class MacOSIRApp(App):
 
         lines = ["# Dissectify — Collector Commands", ""]
 
+        any_built = False
         for b in binaries:
             arch = "arm64" if "arm64" in b.name else "amd64"
             collector = BUILD_DIR / f"Collector-darwin-{arch}"
             if collector.exists():
-                lines.append(f"# Run collector ({arch}):")
+                any_built = True
+                lines.append(f"# Run offline collector ({arch}):")
                 lines.append(f"sudo ./{b.name} -- --embedded_config {collector}")
                 lines.append("")
 
-        if not any((BUILD_DIR / f"Collector-darwin-{('arm64' if 'arm64' in b.name else 'amd64')}").exists() for b in binaries):
-            lines.append("# No collectors built yet — click Build Intel or Build Apple Silicon first")
+            live_collector = BUILD_DIR / f"Collector-Live-darwin-{arch}"
+            if live_collector.exists():
+                any_built = True
+                lines.append(f"# Run live collector ({arch}) — fast triage, 30–90 s:")
+                lines.append(f"sudo ./{b.name} -- --embedded_config {live_collector}")
+                lines.append("")
+
+        if not any_built:
+            lines.append("# No collectors built yet — click Build Intel / Build Apple Silicon / Build Live first")
             lines.append("")
 
         lines.extend([
