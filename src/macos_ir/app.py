@@ -1254,10 +1254,13 @@ class MacOSIRApp(App):
 
         # Write XLSX
         self.call_from_thread(self._set_status, "Writing XLSX...")
-        self.call_from_thread(self._set_progress, total, total, "Writing XLSX...")
+
+        def _xlsx_progress(cur: int, tot: int, label: str) -> None:
+            self.call_from_thread(self._set_progress, cur, tot, label)
+            self.call_from_thread(log.write, f"  [dim]xlsx: {label}[/]")
 
         try:
-            write_xlsx(per_source, all_records, output)
+            write_xlsx(per_source, all_records, output, progress_cb=_xlsx_progress)
         except Exception as e:
             self.call_from_thread(log.write, f"\n[red]XLSX failed: {type(e).__name__}: {e}[/red]")
             self.call_from_thread(self._finish_generate, None)
@@ -1268,12 +1271,27 @@ class MacOSIRApp(App):
         mins, secs = int(elapsed) // 60, int(elapsed) % 60
         sheets = len(all_records) + 1
 
+        # File size for the saved xlsx — reassurance that bytes actually landed
+        try:
+            size_bytes = Path(output).stat().st_size
+            if size_bytes >= 1 << 30:
+                size_str = f"{size_bytes / (1 << 30):.2f} GB"
+            elif size_bytes >= 1 << 20:
+                size_str = f"{size_bytes / (1 << 20):.1f} MB"
+            else:
+                size_str = f"{size_bytes / 1024:.1f} KB"
+        except Exception:
+            size_str = "unknown size"
+
+        self.call_from_thread(log.write, "")
+        self.call_from_thread(log.write, "[bold green]✓ XLSX saved successfully[/]")
         self.call_from_thread(
             log.write,
-            f"\n[bold]Total records:[/bold]  {total_records:,}  "
-            f"({len(all_records)} artifacts with data)\n"
-            f"[bold]XLSX:[/bold]           {output}  ({sheets} sheets)\n"
-            f"[bold]Elapsed:[/bold]        {mins}m {secs}s",
+            f"[bold]File:[/]       [green]{output}[/]\n"
+            f"[bold]Size:[/]       {size_str}\n"
+            f"[bold]Records:[/]    {total_records:,}  ({len(all_records)} artifacts with data)\n"
+            f"[bold]Sheets:[/]     {sheets}\n"
+            f"[bold]Elapsed:[/]    {mins}m {secs}s",
         )
 
         top = sorted([(p[0], p[2]) for p in per_source if p[2]], key=lambda x: -x[1])[:10]
@@ -1282,9 +1300,17 @@ class MacOSIRApp(App):
             for name, n in top:
                 self.call_from_thread(log.write, f"  {name:<40} {n:>8,} records")
 
+        # Progress bar → full + clear "Complete" label
+        self.call_from_thread(self._set_progress, 100, 100, f"Complete — {size_str}")
         self.call_from_thread(
             self._set_status,
-            f"Done: {total_records:,} records, {sheets} sheets, {mins}m {secs}s",
+            f"✓ Saved: {output}  ·  {total_records:,} records  ·  {sheets} sheets  ·  {size_str}  ·  {mins}m {secs}s",
+        )
+        self.call_from_thread(
+            self.notify,
+            f"Workbook saved: {Path(output).name} ({size_str})",
+            severity="information",
+            timeout=10,
         )
         self.call_from_thread(self._finish_generate, output)
 
