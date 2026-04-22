@@ -19,6 +19,10 @@ COLLECTORS_SUBDIR = "Collectors"
 LIVE_COLLECTORS_SUBDIR = "Collectors/Live"
 SHELL_SUBDIR = "shell"
 SHELL_SCRIPT_NAME = "collect_macos.sh"
+# GUIDE_FILE_NAME: metadata ships inside Dissectify itself (guide/GUIDE.yaml in
+# the repo root), not synced from the collectors repo. Keeps the collectors
+# repo pure Velociraptor and ties guide versions to Dissectify releases.
+GUIDE_FILE_NAME = "GUIDE.yaml"
 
 
 def _find_project_root() -> Path:
@@ -37,6 +41,8 @@ PLUGINS_DIR = PROJECT_ROOT / "plugins"
 COLLECTORS_DIR = PROJECT_ROOT / "collectors"
 LIVE_COLLECTORS_DIR = PROJECT_ROOT / "collectors_live"
 SHELL_COLLECTOR = PROJECT_ROOT / SHELL_SCRIPT_NAME
+GUIDE_DIR = PROJECT_ROOT / "guide"
+GUIDE_FILE = GUIDE_DIR / GUIDE_FILE_NAME
 
 
 def _ensure_dir() -> None:
@@ -125,7 +131,10 @@ def _clone_and_sync(
                 if src.exists():
                     dest_abs.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dest_abs)
-                    dest_abs.chmod(0o755)
+                    # Only make it executable if it's a shell script or binary —
+                    # data files (YAML, JSON, Markdown) stay 644.
+                    if dest_abs.suffix in (".sh", "") or dest_abs.name == "collect_macos.sh":
+                        dest_abs.chmod(0o755)
 
         if extra_syncs:
             for src_subdir, dest_dir, dest_glob in extra_syncs:
@@ -160,7 +169,11 @@ def update_plugins() -> tuple[str | None, str | None]:
 
 def update_collectors() -> tuple[str | None, str | None]:
     """Pull from the collectors repo in one clone: offline YAMLs into collectors/,
-    live YAMLs into collectors_live/, shell collector into PROJECT_ROOT."""
+    live YAMLs into collectors_live/, shell collector into PROJECT_ROOT.
+
+    The analysis guide (guide/GUIDE.yaml) is NOT synced here — it ships with
+    Dissectify itself so its version is tied to the app, not the collectors.
+    """
     return _clone_and_sync(
         COLLECTORS_REPO,
         COLLECTORS_SUBDIR,
@@ -552,7 +565,7 @@ def get_run_command() -> tuple[str | None, str | None]:
     """Return (command, error) for running the collector with sudo."""
     collector = get_collector_binary()
     if not collector:
-        return None, "No collector built yet — click 'Build Intel' or 'Build Apple Silicon' first"
+        return None, "No collector built yet — click 'Build Collector' first"
     COLLECTED_DIR.mkdir(parents=True, exist_ok=True)
     return collector, None
 

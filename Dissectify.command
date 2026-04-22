@@ -68,6 +68,13 @@ fi
 
 # ── Step 3: Create venv and install on first run ──
 
+# Detect a broken venv — e.g. folder was moved; the interpreter path inside
+# the venv is hardcoded and won't resolve after a move.
+if [ -d ".venv" ] && ! .venv/bin/python -c "import sys" &>/dev/null; then
+    echo "  ! Virtual environment is broken (folder moved?) — rebuilding..."
+    rm -rf .venv
+fi
+
 if [ ! -d ".venv" ]; then
     echo ""
     echo "  ── First-time setup ──────────────────────────"
@@ -119,6 +126,25 @@ fi
 if [ ! -f ".venv/bin/dissectify" ]; then
     echo "  ! Entry point missing — reinstalling..."
     .venv/bin/pip install --quiet -e .
+fi
+
+# ── Step 5: Sync dependencies if pyproject.toml changed ──
+# Lets newly-added deps install automatically on the first launch after a pull
+# without the user having to run pip manually.
+
+DEPS_MARKER=".venv/.deps-synced-mtime"
+PYPROJECT_MTIME=$(stat -f %m pyproject.toml 2>/dev/null || echo 0)
+SYNCED_MTIME=$(cat "$DEPS_MARKER" 2>/dev/null || echo 0)
+if [ "$PYPROJECT_MTIME" != "$SYNCED_MTIME" ]; then
+    echo "  ! Dependencies out of sync — running pip install..."
+    if .venv/bin/pip install --quiet --upgrade -e .; then
+        echo "$PYPROJECT_MTIME" > "$DEPS_MARKER"
+        echo "  ✓ Dependencies synced"
+    else
+        echo "  ✗ Dependency install failed — Dissectify may not launch."
+        echo "    Run: .venv/bin/pip install -e . (to see full error)"
+        read -p "  Press Enter to continue anyway..."
+    fi
 fi
 
 # ── Launch ──

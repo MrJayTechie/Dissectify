@@ -1,0 +1,1134 @@
+# Dissectify Analysis Guide — metadata for each artifact.
+# Read by Dissectify's Guide + Search tabs. NOT read by Velociraptor.
+# Keyed by the YAML file stem (e.g. 'ShellHistoryAndSessions', 'xpdb').
+# Schema documented in GUIDE_SCHEMA.md.
+
+AddressBook:
+  category: Communications
+  description: 'Apple Contacts app store — contact records with phone numbers, email addresses, physical addresses, birthdays.
+
+    '
+  questions:
+  - Who is in the user's contact book?
+  - Does the user have contact details for a specific person?
+  requires:
+  - fda
+  see_also:
+  - iMessage
+  - CallHistory
+  - Interactions
+  subcategory: Contacts
+AlternateLog:
+  category: System
+  description: '/var/log plus per-user Logs directories — includes system.log, install.log, wifi.log, auth-related logs, launchd,
+    periodic output, and third-party app logs.
+
+    '
+  gotchas:
+  - Most modern macOS events are in the Unified Log, not /var/log.
+  - Parsing gated behind Include Slow due to volume.
+  questions:
+  - What did system.log or install.log show at a given time?
+  - Were there failed authentications?
+  requires:
+  - slow_mode
+  see_also:
+  - utmpx
+  subcategory: System logs
+AppleMail:
+  category: Communications
+  description: Complete Apple Mail store — messages, attachments, mailboxes, rules.
+  questions:
+  - What emails did the user send or receive?
+  - Was a specific email opened / replied to?
+  requires:
+  - fda
+  see_also:
+  - InternetAccounts
+  - AddressBook
+  subcategory: Email
+AppleNotes:
+  category: Communications
+  description: Apple Notes database (current, modern schema).
+  questions:
+  - What notes has the user written?
+  requires:
+  - fda
+  see_also:
+  - notes
+  - Reminders
+  subcategory: Notes
+ApplePayWallet:
+  category: System
+  description: Apple Wallet passes database — cards, boarding passes, event tickets.
+  questions:
+  - What passes does the user have in Wallet?
+  requires:
+  - fda
+  subcategory: Wallet
+Applications:
+  category: Persistence
+  description: 'Info.plist for every app under /Applications and ~/Applications — bundle identifier, version, code signature
+    identity, executable path.
+
+    '
+  questions:
+  - What applications are installed?
+  - Is a suspiciously-named app present?
+  see_also:
+  - InstallHistory
+  - SoftwareInstallationUpdates
+  - LaunchPad
+  subcategory: Installed apps
+Applist:
+  category: User Activity
+  description: 'Spotlight''s per-user applist.dat — tracks app launches by bundle identifier with usage frequency.
+
+    '
+  questions:
+  - Which apps has this user launched from Spotlight or the Dock?
+  - How frequently does the user use a specific app?
+  requires:
+  - sudo
+  see_also:
+  - KnowledgeC
+  - LaunchPad
+  - SpotlightShortCuts
+  subcategory: App launches
+Autostart:
+  category: Persistence
+  description: 'All locations macOS reads at boot/login to autostart processes: LaunchDaemons, LaunchAgents (system/user),
+    StartupItems, periodic scripts, legacy rc/launchd configs.
+
+    '
+  location_in_collection: Sheet "Autostart" in the workbook.
+  questions:
+  - What processes auto-run at boot or login?
+  - Is there a suspicious LaunchAgent or LaunchDaemon?
+  see_also:
+  - KernelExtensions
+  - Applications
+  - ManagedDeviceProfile
+  subcategory: Boot and login autorun
+Biomes:
+  category: User Activity
+  description: 'Intent streams fed to Apple''s on-device ML (Siri suggestions, proactive app hints). Captures app launches,
+    notifications, location, device events. Successor-style companion to KnowledgeC on recent macOS.
+
+    '
+  location_in_collection: Sheet "Biomes" in the workbook.
+  questions:
+  - What apps and events happened on the device recently?
+  - Where does Siri think the user was?
+  requires:
+  - fda
+  see_also:
+  - KnowledgeC
+  - Interactions
+  subcategory: App usage and device state
+Calendars:
+  category: User Activity
+  description: 'Apple Calendar app data — events, attendees, locations, recurrence rules.
+
+    '
+  questions:
+  - What meetings or events is the user attending?
+  - Was the user at a specific event when something happened?
+  requires:
+  - fda
+  see_also:
+  - Reminders
+  - AddressBook
+  subcategory: Productivity
+CallHistory:
+  category: Communications
+  description: 'Combined phone / FaceTime call history (via iPhone handoff) — callers, duration, direction.
+
+    '
+  questions:
+  - Who has the user called, and for how long?
+  requires:
+  - fda
+  see_also:
+  - FaceTime
+  - AddressBook
+  - Interactions
+  subcategory: Calls
+ChromiumBrowsers:
+  category: User Activity
+  description: 'History / Cookies / Bookmarks / Login Data / Web Data for Chrome, Brave, Edge, Chromium, Opera, and Vivaldi
+    (any profile).
+
+    '
+  questions:
+  - What URLs did the user visit in Chrome/Brave/Edge/etc.?
+  - What did the user download via a Chromium browser?
+  - What saved credentials exist?
+  requires:
+  - fda
+  see_also:
+  - SafariFiles
+  - FirefoxFiles
+  - cookies
+  subcategory: Browser activity
+CodeIntegrity:
+  category: Volatile / Runtime
+  description: 'codesign -dv, spctl -a, and sha256 for every unique executable currently running. Surfaces unsigned / adhoc
+    / tampered binaries in real time.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.CodeIntegrity.PsaxComm.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.CodeIntegrity.CodesignPerBinary.raw.txt  (codesign + spctl + sha256 per unique running binary)\n"
+  questions:
+  - Are any unsigned processes running right now?
+  - Is a running binary ad-hoc signed?
+  - What's the hash of a suspicious process?
+  requires:
+  - live
+  see_also:
+  - Processes
+  - SecurityPosture
+  subcategory: Code signing live
+CrashReporter:
+  category: System
+  description: Per-user crash reporter preferences.
+  questions:
+  - Is crash reporting configured to send to a third party?
+  subcategory: Diagnostics
+DHCPLease:
+  category: Network
+  description: Active and historical DHCP leases.
+  questions:
+  - Which networks has this Mac been on (by subnet/router MAC)?
+  - What IP did the Mac have at a given time?
+  requires:
+  - fda
+  see_also:
+  - WifiIntelligence
+  subcategory: Network config
+DSStore:
+  category: Filesystem
+  description: '.DS_Store files created by Finder in browsed directories. Implicitly reveals which folders the user has opened
+    in Finder.
+
+    '
+  questions:
+  - Which folders has the user browsed in Finder?
+  see_also:
+  - SpotlightShortCuts
+  - QuickLook
+  subcategory: Finder metadata
+DocumentRevisions:
+  category: Filesystem
+  description: 'macOS Versions (Auto-Save) database — retains prior versions of saved documents.
+
+    '
+  questions:
+  - Can I recover a previous version of a document?
+  - Was a file modified to hide evidence?
+  see_also:
+  - Trash
+  - FsEvents
+  subcategory: File versions
+FaceTime:
+  category: Communications
+  description: FaceTime audio and video call history stored by the FaceTime app.
+  questions:
+  - Who has the user FaceTimed?
+  requires:
+  - fda
+  see_also:
+  - CallHistory
+  - AddressBook
+  subcategory: Calls
+FavoriteVolumes:
+  category: User Activity
+  description: 'Finder sidebar favorites stored as sharedfilelist .sfl3 files — recent servers, mounted volumes, favorited
+    folders.
+
+    '
+  questions:
+  - What servers or volumes has the user mounted or favorited?
+  - Did the user open an SMB/AFP share?
+  see_also:
+  - SharedFolder
+  - Mounts
+  subcategory: Recent documents
+FindMy:
+  category: User Activity
+  description: 'Cached Find My data — owned devices and their last-known locations, plus friend location sharing entries.
+
+    '
+  questions:
+  - Which Apple devices does this user own or track?
+  - Where was each device last reported?
+  see_also:
+  - iCloud
+  subcategory: Wi-Fi / location
+FirefoxFiles:
+  category: User Activity
+  description: 'Full Firefox profile directory — places.sqlite (history), cookies, logins, downloads, addons.
+
+    '
+  questions:
+  - What URLs did the user visit in Firefox?
+  - What did the user download via Firefox?
+  requires:
+  - fda
+  see_also:
+  - SafariFiles
+  - ChromiumBrowsers
+  subcategory: Browser activity
+FirewallConfiguration:
+  category: Security Posture
+  description: 'Application Firewall (ALF) plist + pf.conf + pf anchors. Static firewall configuration on disk.
+
+    '
+  gotchas:
+  - Live pf rules may differ — see MacOS.Live.Network for runtime state.
+  questions:
+  - Is the application firewall enabled and configured?
+  - What pf rules are defined on disk?
+  see_also:
+  - ManagedDeviceProfile
+  subcategory: Firewall
+FsEvents:
+  category: Filesystem
+  description: 'Volume-level record of filesystem events — file/directory creation, modification, deletion, rename — maintained
+    by the FSEvents daemon in /.fseventsd.
+
+    '
+  gotchas:
+  - Very slow to parse on busy filesystems; gated behind Include Slow.
+  - Files deleted shortly after creation may appear with combined flags (created+removed).
+  location_in_collection: 'Sheet "FsEvents" in the workbook. REQUIRES "Include Slow" toggle ON during workbook generation.
+
+    '
+  questions:
+  - Was a specific file ever created, modified, or deleted on this volume?
+  - What filesystem activity happened around a given timestamp?
+  requires:
+  - slow_mode
+  see_also:
+  - DocumentRevisions
+  - Trash
+  - DSStore
+  subcategory: File-level events
+Hardware:
+  category: Volatile / Runtime
+  description: Live hardware/OS/storage snapshot via system_profiler -json.
+  location_in_collection: "Raw file (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.Hardware.SystemProfiler.raw.json\n"
+  questions:
+  - What hardware is this Mac?
+  - What OS build is running right now?
+  - What storage devices are attached?
+  requires:
+  - live
+  subcategory: Hardware info
+InstallHistory:
+  category: Installation / Software
+  description: '/Library/Receipts/InstallHistory.plist — macOS-maintained list of installer-package installs (both OS updates
+    and third-party .pkg installers).
+
+    '
+  questions:
+  - When was macOS or an app installed/updated?
+  - Was a specific package installed?
+  see_also:
+  - SoftwareInstallationUpdates
+  - Applications
+  subcategory: Install history
+Interactions:
+  category: User Activity
+  description: 'Apple CoreDuet interaction graph — records communication/interaction events with contacts (which person was
+    contacted, via which app, when).
+
+    '
+  location_in_collection: Sheet "Interactions" in the workbook.
+  questions:
+  - Which contacts has the user interacted with recently?
+  - Which app did the user use to contact a specific person?
+  see_also:
+  - AddressBook
+  - iMessage
+  - CallHistory
+  - AppleMail
+  subcategory: Contact interactions
+InternetAccounts:
+  category: Network
+  description: '~/Library/Accounts — signed-in internet accounts (iCloud, Google, Exchange, Mail providers, social).
+
+    '
+  questions:
+  - What cloud/email accounts is the user signed into?
+  see_also:
+  - iCloud
+  - AppleMail
+  subcategory: Accounts
+KernelExtensions:
+  category: Persistence
+  description: 'Installed kernel extensions (kexts), including SIP-protected bundled ones and third-party/staged extensions
+    in /Library/Extensions and /Library/SystemExtensions.
+
+    '
+  gotchas:
+  - Modern macOS replaces kexts with System Extensions — check live KernelModules for loaded state.
+  questions:
+  - What third-party kernel extensions are installed?
+  - Are there staged extensions awaiting load?
+  see_also:
+  - Autostart
+  - ManagedDeviceProfile
+  subcategory: Kernel-level code
+KernelModules:
+  category: Volatile / Runtime
+  description: 'Live view of loaded kernel extensions and System Extensions (kextstat + systemextensionsctl).
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.KernelModules.Kextstat.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.KernelModules.SystemExtensions.raw.txt\n"
+  questions:
+  - What kernel-level code is loaded right now?
+  - Is there an unauthorized ES client?
+  requires:
+  - live
+  see_also:
+  - KernelExtensions
+  - Autostart
+  subcategory: Kernel-level code
+KeyChain:
+  category: Security Posture
+  description: 'Per-user and System keychain files. The files themselves; contents stay encrypted without the unlock password.
+
+    '
+  gotchas:
+  - Contents are encrypted; presence and metadata are what you analyze offline.
+  questions:
+  - What keychains exist on this system?
+  - Is there evidence of tampering with a keychain?
+  requires:
+  - fda
+  - sudo
+  subcategory: Credential stores
+KeyboardDictionary:
+  category: System
+  description: 'Per-user spelling dictionary — custom words the user has added to Apple''s spellchecker.
+
+    '
+  questions:
+  - Has the user added custom words (names, domains, jargon) to the dictionary?
+  subcategory: Preferences
+KnowledgeC:
+  category: User Activity
+  description: 'Apple CoreDuet Knowledge database — per-app usage, foreground time, device plug/unplug, location visits, do-not-disturb,
+    and more. Rich timeline source.
+
+    '
+  gotchas:
+  - Contents rotate out over time — typically ~30-60 days of data.
+  - WAL/SHM files required for complete recent state.
+  location_in_collection: Sheet "KnowledgeC" in the workbook.
+  questions:
+  - Which applications did the user launch and when?
+  - What was the user doing at a specific time?
+  - When was the device plugged in / connected to Wi-Fi?
+  requires:
+  - fda
+  see_also:
+  - Biomes
+  - Interactions
+  - Powerlogs
+  subcategory: App usage and device state
+LaunchPad:
+  category: User Activity
+  description: 'Launchpad SQLite store — icon positions and per-user app launch grid. Indirectly reveals installed-app inventory.
+
+    '
+  questions:
+  - What apps does the user have on their Launchpad?
+  requires:
+  - fda
+  see_also:
+  - Applications
+  - Applist
+  subcategory: App launches
+Launchd:
+  category: Volatile / Runtime
+  description: 'Live launchd state — which services are loaded/disabled/running, with runtime metadata not present in the
+    .plist files on disk.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.Launchd.LaunchctlList.raw.txt\
+    \           (brief list)\n  uploads/tmp/MacOS.Live.Launchd.LaunchctlPrintSystem.raw.txt    (full system detail)\n  uploads/tmp/MacOS.Live.Launchd.LaunchctlPrintGui.raw.txt\
+    \       (user domain)\n  uploads/tmp/MacOS.Live.Launchd.LaunchctlPrintDisabled.raw.txt\n"
+  questions:
+  - Which launchd services are running right now?
+  - Has a daemon been disabled to kill defenses?
+  requires:
+  - live
+  see_also:
+  - Autostart
+  subcategory: Persistence live state
+LibraryPreferences:
+  category: System
+  description: 'Every plist under /Library/Preferences and /Users/*/Library/Preferences — app and system preferences dumped
+    verbatim.
+
+    '
+  questions:
+  - What is an app's recorded preference state?
+  - Are there preferences pointing to suspicious URLs or paths?
+  subcategory: Preferences
+LogStats:
+  category: Volatile / Runtime
+  description: 'Lightweight log counter via `log stats --last 24h` — tells you how busy the unified-log pipeline is.
+
+    '
+  location_in_collection: "Raw file (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.LogStats.LogStats.raw.txt\n"
+  questions:
+  - Is the unified log recording events normally?
+  requires:
+  - live
+  subcategory: Log health
+MDM:
+  category: Volatile / Runtime
+  description: 'Runtime MDM enrollment query via the profiles command — what mdmclient currently considers enrolled.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.MDM.ProfilesList.raw.txt\
+    \        (installed profiles)\n  uploads/tmp/MacOS.Live.MDM.ProfilesEnrollment.raw.txt  (enrollment / DEP state)\n"
+  questions:
+  - Is the Mac currently MDM-enrolled?
+  - Is enrollment supervised (DEP)?
+  requires:
+  - live
+  - sudo
+  see_also:
+  - ManagedDeviceProfile
+  subcategory: MDM live state
+ManagedDeviceProfile:
+  category: Security Posture
+  description: 'On-disk configuration profiles under /private/var/db/ConfigurationProfiles — MDM-pushed and manually installed
+    profiles.
+
+    '
+  questions:
+  - Is this Mac MDM-enrolled?
+  - What configuration profiles are installed?
+  - Is there a rogue profile?
+  requires:
+  - sudo
+  see_also:
+  - TCC
+  - FirewallConfiguration
+  subcategory: MDM / config profiles
+MicrosoftOfficeMRU:
+  category: User Activity
+  description: 'Microsoft Office (Word/Excel/PowerPoint) recent-document list — paths and timestamps of files opened.
+
+    '
+  questions:
+  - What Office documents has the user opened recently?
+  see_also:
+  - SpotlightShortCuts
+  - FavoriteVolumes
+  subcategory: Recent documents
+Mounts:
+  category: Volatile / Runtime
+  description: 'Live volume state: mount, diskutil list/apfs, and tmutil Time Machine inventory.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.Mounts.Mount.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.Mounts.DiskutilList.raw.plist\n  uploads/tmp/MacOS.Live.Mounts.DiskutilApfs.raw.plist\n  uploads/tmp/MacOS.Live.Mounts.TmutilBackups.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.Mounts.TmutilLatest.raw.txt\n"
+  questions:
+  - What volumes are mounted right now?
+  - Is a DMG or external drive attached?
+  - When is the latest Time Machine backup?
+  requires:
+  - live
+  subcategory: Volumes live
+Network:
+  category: Volatile / Runtime
+  description: 'Live network state: open sockets (lsof -i / netstat), routing, ARP, DNS resolver config, pf rules.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.Network.LsofInet.raw.txt\
+    \        (open sockets + owning process)\n  uploads/tmp/MacOS.Live.Network.Netstat.raw.txt         (netstat -anv)\n  uploads/tmp/MacOS.Live.Network.Route.raw.txt\
+    \           (default route)\n  uploads/tmp/MacOS.Live.Network.Arp.raw.txt             (ARP cache)\n  uploads/tmp/MacOS.Live.Network.Ifconfig.raw.txt\
+    \        (interfaces)\n  uploads/tmp/MacOS.Live.Network.ScutilDNS.raw.txt       (DNS resolver config)\n  uploads/tmp/MacOS.Live.Network.ScutilProxy.raw.txt\
+    \     (proxy config)\n  uploads/tmp/MacOS.Live.Network.PfctlRules.raw.txt      (live pf rules)\n  uploads/tmp/MacOS.Live.Network.PfctlInfo.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.Network.PfctlAll.raw.txt\n"
+  questions:
+  - What connections are open right now?
+  - Is there a listening backdoor?
+  - Has DNS been hijacked?
+  requires:
+  - live
+  - sudo
+  see_also:
+  - Processes
+  - FirewallConfiguration
+  subcategory: Network sockets
+Notifications:
+  category: Communications
+  description: 'macOS Notification Center database — historical record of delivered notifications with app, timestamp, and
+    content.
+
+    '
+  questions:
+  - What notifications did apps deliver to the user?
+  - Did a specific message or alert appear on screen?
+  see_also:
+  - KnowledgeC
+  - iMessage
+  - AppleMail
+  subcategory: Notification center
+OSInstallationDate:
+  category: System
+  description: '.AppleSetupDone marker file plus the software update journal — indicates when the OS was initially set up.
+
+    '
+  questions:
+  - When was this Mac first set up (Setup Assistant complete)?
+  see_also:
+  - InstallHistory
+  subcategory: OS identity
+OSName:
+  category: System
+  description: 'SystemVersion.plist — OS name, user-visible version string, build identifier. Plus the kernel file.
+
+    '
+  questions:
+  - What version of macOS is this?
+  - What is the build number?
+  subcategory: OS identity
+Packages:
+  category: Volatile / Runtime
+  description: 'Live query via pkgutil — installed pkg identifiers plus per-pkg metadata.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.Packages.PkgutilList.raw.txt\
+    \         (pkg identifiers)\n  uploads/tmp/MacOS.Live.Packages.PkgutilInfoPerPkg.raw.txt   (per-pkg detail)\n"
+  questions:
+  - What packages are installed via pkgutil right now?
+  requires:
+  - live
+  see_also:
+  - InstallHistory
+  - SoftwareInstallationUpdates
+  subcategory: Installed packages
+Power:
+  category: Volatile / Runtime
+  description: 'pmset state and recent power log tail, plus uptime, vm_stat, sysctl. Kernel counters + power events from right
+    now.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.Power.PmsetEverything.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.Power.PmsetLog.raw.txt           (last 500 log lines)\n  uploads/tmp/MacOS.Live.Power.Uptime.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.Power.VmStat.raw.txt\n  uploads/tmp/MacOS.Live.Power.Sysctl.raw.txt\n"
+  questions:
+  - When did the Mac last wake / sleep?
+  - What is current memory pressure and load?
+  requires:
+  - live
+  subcategory: Power + memory
+Powerlogs:
+  category: User Activity
+  description: 'Battery and power event telemetry. Captures sleep/wake, app energy impact, thermal events, charging history.
+    Useful as a device-lifecycle timeline.
+
+    '
+  location_in_collection: Sheet "Powerlogs" in the workbook.
+  questions:
+  - When was the laptop sleeping / awake / plugged in?
+  - Which app burned power during a given window?
+  requires:
+  - sudo
+  see_also:
+  - KnowledgeC
+  subcategory: Device lifecycle
+PrintJobs:
+  category: System
+  description: CUPS spool directory and PPD files — historical print queue state.
+  questions:
+  - What has the user printed recently?
+  subcategory: Diagnostics
+Processes:
+  category: Volatile / Runtime
+  description: 'Live process listing: ps with args, ps with environment variables, and lsof file-handle list.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.Processes.PsTree.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.Processes.PsAuxwwE.raw.txt\n  uploads/tmp/MacOS.Live.Processes.LsofHandles.raw.txt\n"
+  questions:
+  - What is running on this Mac right now?
+  - What files does a process have open?
+  - What environment variables did the attacker inject?
+  requires:
+  - live
+  - sudo
+  see_also:
+  - Network
+  - Launchd
+  - CodeIntegrity
+  subcategory: Processes
+QuickLook:
+  category: Filesystem
+  description: 'QuickLook thumbnail cache — thumbnails of files the user previewed via Finder spacebar. Retains images of
+    deleted files.
+
+    '
+  questions:
+  - Did the user preview a specific file (even if later deleted)?
+  requires:
+  - fda
+  see_also:
+  - Trash
+  - DocumentRevisions
+  subcategory: Previews
+Reminders:
+  category: User Activity
+  description: 'Apple Reminders app store — lists, items, completion status, due dates.
+
+    '
+  questions:
+  - What reminders did the user create?
+  - What was on the user's to-do list during a given window?
+  requires:
+  - fda
+  see_also:
+  - Calendars
+  - AppleNotes
+  subcategory: Productivity
+SSHHost:
+  category: Network
+  description: Per-user ~/.ssh directory — known_hosts, authorized_keys.
+  questions:
+  - Which hosts has this user SSH'd to?
+  - What keys can log in to this account?
+  see_also:
+  - Users
+  subcategory: SSH
+SafariFiles:
+  category: User Activity
+  description: 'Full Safari data: History.db, Downloads.plist, Bookmarks.plist, tab snapshots, and cookies.
+
+    '
+  questions:
+  - What URLs did the user visit in Safari?
+  - What did the user download via Safari?
+  - What was in open Safari tabs recently?
+  requires:
+  - fda
+  see_also:
+  - ChromiumBrowsers
+  - FirefoxFiles
+  - cookies
+  subcategory: Browser activity
+SavedState:
+  category: System
+  description: 'Saved Application State — per-app window/document state preserved across app restarts. Reveals what apps were
+    open and what documents they were showing.
+
+    '
+  questions:
+  - What app windows and documents were open when the app last quit?
+  see_also:
+  - TerminalState
+  subcategory: App state
+ScreenSharing:
+  category: Network
+  description: Apple Screen Sharing preferences and related xpc state.
+  questions:
+  - Has Screen Sharing been used or configured?
+  - Who has screen-shared into this Mac?
+  see_also:
+  - ard
+  - msrdc
+  - SharedFolder
+  subcategory: Remote access
+ScreenTime:
+  category: User Activity
+  description: 'Apple Screen Time database — per-app daily usage minutes, pickup counts, notification counts. Strong corroborating
+    source for user-activity timelines.
+
+    '
+  gotchas:
+  - Only populated if Screen Time was enabled in System Settings.
+  location_in_collection: Sheet "ScreenTime" in the workbook.
+  questions:
+  - How much time did the user spend in each app?
+  - How often was the Mac picked up / unlocked?
+  see_also:
+  - KnowledgeC
+  - Biomes
+  subcategory: App usage and device state
+SecurityPosture:
+  category: Volatile / Runtime
+  description: 'Runtime values of Gatekeeper (spctl), SIP (csrutil), FileVault (fdesetup), NVRAM boot-args, and the Application
+    Firewall.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.SecurityPosture.Spctl.raw.txt\
+    \           (Gatekeeper status)\n  uploads/tmp/MacOS.Live.SecurityPosture.Csrutil.raw.txt         (SIP status)\n  uploads/tmp/MacOS.Live.SecurityPosture.Fdesetup.raw.txt\
+    \        (FileVault)\n  uploads/tmp/MacOS.Live.SecurityPosture.Nvram.raw.txt           (boot-args, csr-active)\n  uploads/tmp/MacOS.Live.SecurityPosture.FirewallGlobal.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.SecurityPosture.FirewallApps.raw.txt\n  uploads/tmp/MacOS.Live.SecurityPosture.FirewallStealth.raw.txt\n"
+  questions:
+  - Is SIP disabled right now?
+  - Is Gatekeeper or FileVault off?
+  - Are boot-args tampered?
+  requires:
+  - live
+  see_also:
+  - FirewallConfiguration
+  - TCC
+  subcategory: Runtime security flags
+Sessions:
+  category: Volatile / Runtime
+  description: Who is logged in right now (who, w), plus recent login history (last).
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.Sessions.Who.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.Sessions.W.raw.txt\n  uploads/tmp/MacOS.Live.Sessions.Last.raw.txt     (last 20 logins)\n  uploads/tmp/MacOS.Live.Sessions.Id.raw.txt\n\
+    \  uploads/tmp/MacOS.Live.Sessions.Groups.raw.txt\n"
+  questions:
+  - Who is logged in at this instant?
+  - Were there recent SSH logins?
+  requires:
+  - live
+  see_also:
+  - utmpx
+  - Users
+  subcategory: Login sessions live
+SharedFolder:
+  category: Network
+  description: SMB/AFP sharepoint definitions and remote management plists.
+  questions:
+  - What folders does this Mac share on the network?
+  see_also:
+  - FavoriteVolumes
+  - ScreenSharing
+  subcategory: File sharing
+ShellHistoryAndSessions:
+  category: User Activity
+  description: 'Shell command history for every user plus per-tab zsh/bash session state. Covers the default interactive shells
+    on macOS.
+
+    '
+  gotchas:
+  - Users can disable history by unsetting HISTFILE.
+  - Interactive shells only — scripts and automation not captured here.
+  - Timestamps require `setopt EXTENDED_HISTORY` in .zshrc.
+  location_in_collection: 'Sheet "ShellHistoryAndSessions" in the workbook; raw files under filesystem/Users/*/.zsh_history
+    and .bash_history.
+
+    '
+  questions:
+  - Did the user run a specific command?
+  - What was the user doing in Terminal?
+  - When did the user last interact with the shell?
+  see_also:
+  - sudolastrun
+  - KnowledgeC
+  - AlternateLog
+  - utmpx
+  subcategory: Command execution
+SoftwareInstallationUpdates:
+  category: Installation / Software
+  description: 'App Store agent database, /var/db/receipts, and SoftwareUpdate preferences — broader install/update telemetry
+    than InstallHistory alone.
+
+    '
+  questions:
+  - What App Store apps are installed?
+  - When did the last OS update run?
+  see_also:
+  - InstallHistory
+  - Applications
+  subcategory: Install history
+SpotlightShortCuts:
+  category: User Activity
+  description: 'Spotlight typed-search shortcuts — strings the user typed in Spotlight that Apple auto-memorizes for quick
+    re-use.
+
+    '
+  questions:
+  - What has the user searched for in Spotlight?
+  - Did the user search for specific filenames or topics?
+  see_also:
+  - Applist
+  - SavedState
+  subcategory: Recent searches
+Sudoers:
+  category: Security Posture
+  description: /etc/sudoers — static sudo policy.
+  questions:
+  - Who can run sudo, and with what privileges?
+  - Are there NOPASSWD rules?
+  requires:
+  - sudo
+  see_also:
+  - sudolastrun
+  - Users
+  subcategory: Privilege escalation
+TCC:
+  category: Security Posture
+  description: 'Transparency, Consent, and Control database — records which apps have been granted permission to access camera,
+    microphone, Full Disk, screen recording, input monitoring, etc. Both system and per-user stores.
+
+    '
+  questions:
+  - Which app has access to the camera / microphone / Full Disk?
+  - Did an app recently gain a sensitive permission?
+  requires:
+  - fda
+  see_also:
+  - ManagedDeviceProfile
+  subcategory: Privacy permissions
+TerminalState:
+  category: System
+  description: Saved Terminal.app window state — last-open terminals.
+  gotchas:
+  - macOS 15 changed Terminal saved-state handling; may be empty on recent versions.
+  questions:
+  - What Terminal windows were open?
+  see_also:
+  - SavedState
+  - ShellHistoryAndSessions
+  subcategory: App state
+Trash:
+  category: Filesystem
+  description: Contents of each user's .Trash directory plus the iCloud Drive Trash.
+  questions:
+  - What files did the user delete recently?
+  - Is there evidence of files the user tried to hide by trashing?
+  requires:
+  - fda
+  see_also:
+  - FsEvents
+  - DocumentRevisions
+  subcategory: Deletion
+USB:
+  category: Volatile / Runtime
+  description: 'Live USB device tree (system_profiler SPUSBDataType -json and ioreg) — what''s attached right now.
+
+    '
+  location_in_collection: "Raw files (live collections only — not in the workbook):\n  uploads/tmp/MacOS.Live.USB.SystemProfilerUSB.raw.json\
+    \   (Apple's structured JSON)\n  uploads/tmp/MacOS.Live.USB.IoregUSB.raw.txt             (ioreg dump)\n"
+  questions:
+  - What USB devices are connected right now?
+  - Is there an unexpected mass-storage device?
+  requires:
+  - live
+  subcategory: USB devices live
+Users:
+  category: System
+  description: 'Directory Services local node — full user and group records for every local account (uid, gid, home dir, shell,
+    admin status, password hash for kcpassword-style accounts).
+
+    '
+  questions:
+  - What local user accounts exist on this Mac?
+  - Is a given user an administrator?
+  - Are there unexpected service accounts?
+  requires:
+  - sudo
+  see_also:
+  - utmpx
+  - Sudoers
+  - InternetAccounts
+  subcategory: User accounts
+WifiIntelligence:
+  category: User Activity
+  description: 'Per-user Wi-Fi association history and inferred location points. Shows which networks the Mac joined and when.
+
+    '
+  location_in_collection: Sheet "WifiIntelligence" in the workbook.
+  questions:
+  - Which Wi-Fi networks did this Mac connect to?
+  - Where was the Mac physically located over time?
+  requires:
+  - fda
+  see_also:
+  - DHCPLease
+  - KnowledgeC
+  subcategory: Wi-Fi / location
+ard:
+  category: Network
+  description: Apple Remote Desktop caches — AppUsage and user account records.
+  gotchas:
+  - Paths are SIP/root-protected; may be inaccessible without sudo.
+  questions:
+  - Was Apple Remote Desktop used against this Mac?
+  see_also:
+  - ScreenSharing
+  subcategory: Remote access
+cookies:
+  category: User Activity
+  description: 'Safari binary cookie store and standalone cookie files for additional browsers.
+
+    '
+  questions:
+  - What session cookies are present for suspicious domains?
+  requires:
+  - fda
+  see_also:
+  - SafariFiles
+  - ChromiumBrowsers
+  - FirefoxFiles
+  subcategory: Browser activity
+etcFolder:
+  category: System
+  description: 'Full /private/etc directory — system configuration files (pam.d, ssh_config, ssl, periodic, etc.).
+
+    '
+  questions:
+  - Have any /etc config files been modified?
+  - Is there an unexpected pam.d override?
+  see_also:
+  - Sudoers
+  - hosts
+  - Autostart
+  subcategory: System config
+hosts:
+  category: Network
+  description: /etc/hosts static hostname mappings.
+  questions:
+  - Has /etc/hosts been modified to redirect a domain?
+  see_also:
+  - etcFolder
+  subcategory: Network config
+iCloud:
+  category: Cloud / Devices
+  description: 'iCloud session/sync databases and synced-preferences containers — reveals which containers sync and account
+    state.
+
+    '
+  questions:
+  - Is the user signed into iCloud?
+  - What iCloud features are enabled?
+  see_also:
+  - iCloudLocalStorage
+  - InternetAccounts
+  - FindMy
+  subcategory: iCloud state
+iCloudLocalStorage:
+  category: Cloud / Devices
+  description: 'Everything under ~/Library/Mobile Documents — the on-disk iCloud Drive cache including Desktop/Documents sync.
+
+    '
+  questions:
+  - What files live in the user's iCloud Drive?
+  - Can I recover a deleted iCloud file from the local cache?
+  requires:
+  - fda
+  see_also:
+  - iCloud
+  subcategory: iCloud storage
+iDeviceBackup:
+  category: Cloud / Devices
+  description: 'Local iTunes/Finder backups of paired iPhones/iPads in ~/Library/Application Support/MobileSync/Backup.
+
+    '
+  questions:
+  - Has this Mac backed up any iOS devices locally?
+  - Which devices and when?
+  see_also:
+  - lockdown
+  subcategory: iOS backups
+iMessage:
+  category: Communications
+  description: 'Messages.app chat database — iMessage and SMS/RCS bridge conversations, participants, attachments.
+
+    '
+  location_in_collection: Sheet "iMessage" in the workbook.
+  questions:
+  - What has the user been messaging and with whom?
+  - Are there specific contacts or phone numbers of interest?
+  requires:
+  - fda
+  see_also:
+  - AddressBook
+  - Interactions
+  - CallHistory
+  subcategory: Messaging
+localtime:
+  category: System
+  description: /etc/localtime symlink — current system timezone.
+  questions:
+  - What timezone is this Mac configured for?
+  subcategory: System config
+lockdown:
+  category: Network
+  description: 'iOS device pairing records in /private/var/db/lockdown — evidence of iPhone/iPad paired with this Mac.
+
+    '
+  questions:
+  - Has an iOS device been paired with this Mac?
+  - Which devices and when?
+  requires:
+  - fda
+  see_also:
+  - iDeviceBackup
+  - FindMy
+  subcategory: iOS pairing
+msrdc:
+  category: Network
+  description: 'Microsoft Remote Desktop (Mac client) connection database — saved RDP hosts, supporting images.
+
+    '
+  questions:
+  - What Windows hosts has the user RDP'd to?
+  see_also:
+  - ScreenSharing
+  subcategory: Remote access
+notes:
+  category: Communications
+  description: 'Broader Apple Notes container — group containers and legacy paths, captures older note formats and sync state.
+
+    '
+  questions:
+  - Are there legacy or unmigrated notes on this system?
+  requires:
+  - fda
+  see_also:
+  - AppleNotes
+  subcategory: Notes
+sudolastrun:
+  category: Security Posture
+  description: 'sudo timestamp directory — indicates when each user last successfully ran sudo without re-auth.
+
+    '
+  questions:
+  - When did each user last use sudo?
+  requires:
+  - sudo
+  see_also:
+  - Sudoers
+  - ShellHistoryAndSessions
+  subcategory: Privilege escalation
+utmpx:
+  category: System
+  description: 'Binary login-accounting file — per-session tty/hostname/time records for console and ssh logins.
+
+    '
+  questions:
+  - Who has logged into this Mac and when?
+  - Were there remote SSH logins?
+  see_also:
+  - Users
+  - AlternateLog
+  - SSHHost
+  subcategory: Login records
+xpdb:
+  category: Security Posture
+  description: 'Apple XProtect database — signatures and historical detection state for Apple''s built-in malware scanner.
+
+    '
+  gotchas:
+  - SIP-protected paths; may be partially inaccessible without SIP disabled.
+  questions:
+  - What XProtect signatures are present?
+  - Did XProtect detect anything on this host?
+  requires:
+  - sudo
+  subcategory: XProtect

@@ -1,0 +1,112 @@
+name: MacOS.Live.Network
+description: |
+  Captures live network state: sockets, routing, ARP, DNS resolver config, pf rules.
+  Output is redirected to /tmp/ before upload to bypass the 10 KB data-accessor cap.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: LsofInet
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.LsofInet.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "lsof -i -nP > " + out])
+    SELECT "lsof -i -nP" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="LsofInet.raw.txt") AS RawUpload FROM scope()
+
+- name: Netstat
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.Netstat.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "netstat -anv > " + out])
+    SELECT "netstat -anv" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Netstat.raw.txt") AS RawUpload FROM scope()
+
+- name: Route
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.Route.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "route -n get default > " + out])
+    SELECT "route -n get default" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Route.raw.txt") AS RawUpload FROM scope()
+
+- name: Arp
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.Arp.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "arp -a > " + out])
+    SELECT "arp -a" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Arp.raw.txt") AS RawUpload FROM scope()
+
+- name: Ifconfig
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.Ifconfig.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "ifconfig -a > " + out])
+    SELECT "ifconfig -a" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Ifconfig.raw.txt") AS RawUpload FROM scope()
+
+- name: ScutilDNS
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.ScutilDNS.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "scutil --dns > " + out])
+    SELECT "scutil --dns" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="ScutilDNS.raw.txt") AS RawUpload FROM scope()
+
+- name: ScutilProxy
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.ScutilProxy.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "scutil --proxy > " + out])
+    SELECT "scutil --proxy" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="ScutilProxy.raw.txt") AS RawUpload FROM scope()
+
+- name: PfctlRules
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.PfctlRules.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "pfctl -sr > " + out + " 2>&1"])
+    SELECT "pfctl -sr" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="PfctlRules.raw.txt") AS RawUpload FROM scope()
+
+- name: PfctlInfo
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.PfctlInfo.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "pfctl -si > " + out + " 2>&1"])
+    SELECT "pfctl -si" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="PfctlInfo.raw.txt") AS RawUpload FROM scope()
+
+- name: PfctlAll
+  query: |
+    LET out = "/tmp/MacOS.Live.Network.PfctlAll.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "pfctl -s all > " + out + " 2>&1"])
+    SELECT "pfctl -s all" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="PfctlAll.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Network sockets
+  description: |
+    Live network state: open sockets (lsof -i / netstat), routing, ARP, DNS resolver config, pf rules.
+  questions:
+    - "What connections are open right now?"
+    - "Is there a listening backdoor?"
+    - "Has DNS been hijacked?"
+  requires:
+    - live
+    - sudo
+  see_also: [Processes, FirewallConfiguration]

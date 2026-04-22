@@ -1,0 +1,65 @@
+name: MacOS.Live.Mounts
+description: |
+  Captures live volume / mount state. Includes Time Machine backup inventory
+  which is only queryable via tmutil, not from disk files.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: Mount
+  query: |
+    LET out = "/tmp/MacOS.Live.Mounts.Mount.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "mount > " + out])
+    SELECT "mount" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Mount.raw.txt") AS RawUpload FROM scope()
+
+- name: DiskutilList
+  query: |
+    LET out = "/tmp/MacOS.Live.Mounts.DiskutilList.raw.plist"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "diskutil list -plist > " + out])
+    SELECT "diskutil list -plist" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="DiskutilList.raw.plist") AS RawUpload FROM scope()
+
+- name: DiskutilApfs
+  query: |
+    LET out = "/tmp/MacOS.Live.Mounts.DiskutilApfs.raw.plist"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "diskutil apfs list -plist > " + out])
+    SELECT "diskutil apfs list -plist" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="DiskutilApfs.raw.plist") AS RawUpload FROM scope()
+
+- name: TmutilBackups
+  query: |
+    LET out = "/tmp/MacOS.Live.Mounts.TmutilBackups.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "tmutil listbackups > " + out + " 2>&1"])
+    SELECT "tmutil listbackups" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="TmutilBackups.raw.txt") AS RawUpload FROM scope()
+
+- name: TmutilLatest
+  query: |
+    LET out = "/tmp/MacOS.Live.Mounts.TmutilLatest.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "tmutil latestbackup > " + out + " 2>&1"])
+    SELECT "tmutil latestbackup" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="TmutilLatest.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Volumes live
+  description: |
+    Live volume state: mount, diskutil list/apfs, and tmutil Time Machine inventory.
+  questions:
+    - "What volumes are mounted right now?"
+    - "Is a DMG or external drive attached?"
+    - "When is the latest Time Machine backup?"
+  requires:
+    - live

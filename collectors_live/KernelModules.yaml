@@ -1,0 +1,38 @@
+name: MacOS.Live.KernelModules
+description: |
+  Captures currently loaded kernel extensions and system extensions.
+  kextstat for legacy KEXTs, systemextensionsctl for macOS 10.15+ system extensions.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: Kextstat
+  query: |
+    LET out = "/tmp/MacOS.Live.KernelModules.Kextstat.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "kextstat -l > " + out])
+    SELECT "kextstat -l" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Kextstat.raw.txt") AS RawUpload FROM scope()
+
+- name: SystemExtensions
+  query: |
+    LET out = "/tmp/MacOS.Live.KernelModules.SystemExtensions.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "systemextensionsctl list > " + out + " 2>&1"])
+    SELECT "systemextensionsctl list" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="SystemExtensions.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Kernel-level code
+  description: |
+    Live view of loaded kernel extensions and System Extensions (kextstat + systemextensionsctl).
+  questions:
+    - "What kernel-level code is loaded right now?"
+    - "Is there an unauthorized ES client?"
+  requires:
+    - live
+  see_also: [KernelExtensions, Autostart]

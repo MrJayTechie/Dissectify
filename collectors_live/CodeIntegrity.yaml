@@ -1,0 +1,43 @@
+name: MacOS.Live.CodeIntegrity
+description: |
+  For every unique executable path currently used by a running process, runs
+  codesign -dv, spctl -a, and sha256. Surfaces unsigned / adhoc-signed /
+  tampered binaries that are live right now. Iteration is done by a shell
+  loop to keep VQL simple; output is one combined text blob per source.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: PsaxComm
+  query: |
+    LET out = "/tmp/MacOS.Live.CodeIntegrity.PsaxComm.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "ps -Axo pid,comm > " + out])
+    SELECT "ps -Axo pid,comm" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="PsaxComm.raw.txt") AS RawUpload FROM scope()
+
+- name: CodesignPerBinary
+  query: |
+    LET out = "/tmp/MacOS.Live.CodeIntegrity.CodesignPerBinary.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c",
+                "ps -Axo comm= | sort -u | grep '^/' | while read p; do echo \"=== $p ===\"; codesign -dv --verbose=4 \"$p\" 2>&1; spctl -a -vv \"$p\" 2>&1; shasum -a 256 \"$p\" 2>&1; echo; done > " + out])
+    SELECT "codesign + spctl + shasum per running binary (shell loop)" AS Command,
+           run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="CodesignPerBinary.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Code signing live
+  description: |
+    codesign -dv, spctl -a, and sha256 for every unique executable currently running. Surfaces unsigned / adhoc / tampered binaries in real time.
+  questions:
+    - "Are any unsigned processes running right now?"
+    - "Is a running binary ad-hoc signed?"
+    - "What's the hash of a suspicious process?"
+  requires:
+    - live
+  see_also: [Processes, SecurityPosture]

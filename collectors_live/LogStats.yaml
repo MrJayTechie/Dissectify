@@ -1,0 +1,28 @@
+name: MacOS.Live.LogStats
+description: |
+  Lightweight unified-log health indicator — just counts, not content. Tells
+  the analyst how busy the log pipeline is. Full tracev3 log data comes from
+  the offline collector (/var/db/diagnostics/), not here.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: LogStats
+  query: |
+    LET out = "/tmp/MacOS.Live.LogStats.LogStats.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "log stats --last 24h > " + out + " 2>&1"])
+    SELECT "log stats --last 24h" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="LogStats.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Log health
+  description: |
+    Lightweight log counter via `log stats --last 24h` — tells you how busy the unified-log pipeline is.
+  questions:
+    - "Is the unified log recording events normally?"
+  requires:
+    - live

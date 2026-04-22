@@ -1,0 +1,39 @@
+name: MacOS.Live.Packages
+description: |
+  Captures installed pkg receipts via pkgutil. Complements the offline
+  /Library/Receipts/InstallHistory.plist by catching pkgs registered with
+  pkgutil but not yet written to the install history.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: PkgutilList
+  query: |
+    LET out = "/tmp/MacOS.Live.Packages.PkgutilList.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "pkgutil --pkgs > " + out])
+    SELECT "pkgutil --pkgs" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="PkgutilList.raw.txt") AS RawUpload FROM scope()
+
+- name: PkgutilInfoPerPkg
+  query: |
+    LET out = "/tmp/MacOS.Live.Packages.PkgutilInfoPerPkg.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c",
+                "for p in $(pkgutil --pkgs); do echo \"=== $p ===\"; pkgutil --pkg-info \"$p\"; echo; done > " + out])
+    SELECT "pkgutil --pkg-info (per pkg, shell loop)" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="PkgutilInfoPerPkg.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Installed packages
+  description: |
+    Live query via pkgutil — installed pkg identifiers plus per-pkg metadata.
+  questions:
+    - "What packages are installed via pkgutil right now?"
+  requires:
+    - live
+  see_also: [InstallHistory, SoftwareInstallationUpdates]

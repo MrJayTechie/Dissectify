@@ -1,0 +1,41 @@
+name: MacOS.Live.MDM
+description: |
+  Captures live MDM enrollment state via the profiles command. Distinct from
+  the on-disk ConfigurationProfiles directory (offline collector) — this shows
+  what the mdmclient currently considers installed and enrolled.
+  Requires root for full detail.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: ProfilesList
+  query: |
+    LET out = "/tmp/MacOS.Live.MDM.ProfilesList.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "profiles -L > " + out + " 2>&1"])
+    SELECT "profiles -L" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="ProfilesList.raw.txt") AS RawUpload FROM scope()
+
+- name: ProfilesEnrollment
+  query: |
+    LET out = "/tmp/MacOS.Live.MDM.ProfilesEnrollment.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "profiles show -type enrollment > " + out + " 2>&1"])
+    SELECT "profiles show -type enrollment" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="ProfilesEnrollment.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: MDM live state
+  description: |
+    Runtime MDM enrollment query via the profiles command — what mdmclient currently considers enrolled.
+  questions:
+    - "Is the Mac currently MDM-enrolled?"
+    - "Is enrollment supervised (DEP)?"
+  requires:
+    - live
+    - sudo
+  see_also: [ManagedDeviceProfile]

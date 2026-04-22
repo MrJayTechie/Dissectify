@@ -1,0 +1,88 @@
+name: MacOS.Live.SecurityPosture
+description: |
+  Captures runtime security flags: Gatekeeper, SIP, FileVault, firewall, NVRAM
+  boot-args. These are kernel/runtime values — not extractable from disk files
+  alone. If any come back "disabled", treat as a critical finding.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: Spctl
+  query: |
+    LET out = "/tmp/MacOS.Live.SecurityPosture.Spctl.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "spctl --status > " + out + " 2>&1"])
+    SELECT "spctl --status" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Spctl.raw.txt") AS RawUpload FROM scope()
+
+- name: Csrutil
+  query: |
+    LET out = "/tmp/MacOS.Live.SecurityPosture.Csrutil.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "csrutil status > " + out + " 2>&1"])
+    SELECT "csrutil status" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Csrutil.raw.txt") AS RawUpload FROM scope()
+
+- name: Fdesetup
+  query: |
+    LET out = "/tmp/MacOS.Live.SecurityPosture.Fdesetup.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "fdesetup status > " + out + " 2>&1"])
+    SELECT "fdesetup status" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Fdesetup.raw.txt") AS RawUpload FROM scope()
+
+- name: Nvram
+  query: |
+    LET out = "/tmp/MacOS.Live.SecurityPosture.Nvram.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "nvram -p > " + out + " 2>&1"])
+    SELECT "nvram -p" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Nvram.raw.txt") AS RawUpload FROM scope()
+
+- name: FirewallGlobal
+  query: |
+    LET out = "/tmp/MacOS.Live.SecurityPosture.FirewallGlobal.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c",
+                "/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate > " + out + " 2>&1"])
+    SELECT "socketfilterfw --getglobalstate" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="FirewallGlobal.raw.txt") AS RawUpload FROM scope()
+
+- name: FirewallApps
+  query: |
+    LET out = "/tmp/MacOS.Live.SecurityPosture.FirewallApps.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c",
+                "/usr/libexec/ApplicationFirewall/socketfilterfw --listapps > " + out + " 2>&1"])
+    SELECT "socketfilterfw --listapps" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="FirewallApps.raw.txt") AS RawUpload FROM scope()
+
+- name: FirewallStealth
+  query: |
+    LET out = "/tmp/MacOS.Live.SecurityPosture.FirewallStealth.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c",
+                "/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode > " + out + " 2>&1"])
+    SELECT "socketfilterfw --getstealthmode" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="FirewallStealth.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Runtime security flags
+  description: |
+    Runtime values of Gatekeeper (spctl), SIP (csrutil), FileVault (fdesetup), NVRAM boot-args, and the Application Firewall.
+  questions:
+    - "Is SIP disabled right now?"
+    - "Is Gatekeeper or FileVault off?"
+    - "Are boot-args tampered?"
+  requires:
+    - live
+  see_also: [FirewallConfiguration, TCC]

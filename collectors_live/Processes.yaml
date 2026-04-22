@@ -1,0 +1,64 @@
+name: MacOS.Live.Processes
+description: |
+  Captures live process state: ps listing, ps with env vars, open file handles.
+  Output is redirected to /tmp/ before upload to bypass the 10 KB data-accessor cap.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: PsTree
+  query: |
+    LET out = "/tmp/MacOS.Live.Processes.PsTree.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c",
+                "ps -Aeo pid,ppid,user,uid,gid,start,etime,%cpu,%mem,command > /tmp/MacOS.Live.Processes.PsTree.raw.txt"])
+    SELECT "ps -Aeo pid,ppid,user,uid,gid,start,etime,%cpu,%mem,command" AS Command,
+           run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes,
+           len(list=run[0].Stderr) AS StderrBytes,
+           run[0].Stderr AS Stderr,
+           upload(file=out, name="PsTree.raw.txt") AS RawUpload
+    FROM scope()
+
+- name: PsAuxwwE
+  query: |
+    LET out = "/tmp/MacOS.Live.Processes.PsAuxwwE.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c",
+                "ps auxwwE > /tmp/MacOS.Live.Processes.PsAuxwwE.raw.txt"])
+    SELECT "ps auxwwE (BSD syntax, includes env)" AS Command,
+           run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes,
+           len(list=run[0].Stderr) AS StderrBytes,
+           run[0].Stderr AS Stderr,
+           upload(file=out, name="PsAuxwwE.raw.txt") AS RawUpload
+    FROM scope()
+
+- name: LsofHandles
+  query: |
+    LET out = "/tmp/MacOS.Live.Processes.LsofHandles.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c",
+                "lsof -nP -X > /tmp/MacOS.Live.Processes.LsofHandles.raw.txt"])
+    SELECT "lsof -nP -X" AS Command,
+           run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes,
+           len(list=run[0].Stderr) AS StderrBytes,
+           run[0].Stderr AS Stderr,
+           upload(file=out, name="LsofHandles.raw.txt") AS RawUpload
+    FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Processes
+  description: |
+    Live process listing: ps with args, ps with environment variables, and lsof file-handle list.
+  questions:
+    - "What is running on this Mac right now?"
+    - "What files does a process have open?"
+    - "What environment variables did the attacker inject?"
+  requires:
+    - live
+    - sudo
+  see_also: [Network, Launchd, CodeIntegrity]

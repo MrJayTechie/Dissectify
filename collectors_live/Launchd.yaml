@@ -1,0 +1,57 @@
+name: MacOS.Live.Launchd
+description: |
+  Captures live launchd job state. Distinct from the on-disk .plist files
+  (which the offline collector grabs) — this is what is currently loaded,
+  enabled/disabled, and running.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: LaunchctlList
+  query: |
+    LET out = "/tmp/MacOS.Live.Launchd.LaunchctlList.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "launchctl list > " + out])
+    SELECT "launchctl list" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="LaunchctlList.raw.txt") AS RawUpload FROM scope()
+
+- name: LaunchctlPrintSystem
+  query: |
+    LET out = "/tmp/MacOS.Live.Launchd.LaunchctlPrintSystem.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "launchctl print system > " + out + " 2>&1"])
+    SELECT "launchctl print system" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="LaunchctlPrintSystem.raw.txt") AS RawUpload FROM scope()
+
+- name: LaunchctlPrintGui
+  query: |
+    LET out = "/tmp/MacOS.Live.Launchd.LaunchctlPrintGui.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "launchctl print gui/$(id -u) > " + out + " 2>&1"])
+    SELECT "launchctl print gui/$(id -u)" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="LaunchctlPrintGui.raw.txt") AS RawUpload FROM scope()
+
+- name: LaunchctlPrintDisabled
+  query: |
+    LET out = "/tmp/MacOS.Live.Launchd.LaunchctlPrintDisabled.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "launchctl print-disabled system > " + out + " 2>&1"])
+    SELECT "launchctl print-disabled system" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="LaunchctlPrintDisabled.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Persistence live state
+  description: |
+    Live launchd state — which services are loaded/disabled/running, with runtime metadata not present in the .plist files on disk.
+  questions:
+    - "Which launchd services are running right now?"
+    - "Has a daemon been disabled to kill defenses?"
+  requires:
+    - live
+  see_also: [Autostart]

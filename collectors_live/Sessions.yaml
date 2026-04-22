@@ -1,0 +1,64 @@
+name: MacOS.Live.Sessions
+description: |
+  Captures live user session state: who is logged in, recent login history,
+  current effective identity and group membership.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: Who
+  query: |
+    LET out = "/tmp/MacOS.Live.Sessions.Who.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "who > " + out])
+    SELECT "who" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Who.raw.txt") AS RawUpload FROM scope()
+
+- name: W
+  query: |
+    LET out = "/tmp/MacOS.Live.Sessions.W.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "w > " + out])
+    SELECT "w" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="W.raw.txt") AS RawUpload FROM scope()
+
+- name: Last
+  query: |
+    LET out = "/tmp/MacOS.Live.Sessions.Last.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "last -20 > " + out])
+    SELECT "last -20" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Last.raw.txt") AS RawUpload FROM scope()
+
+- name: Id
+  query: |
+    LET out = "/tmp/MacOS.Live.Sessions.Id.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "id > " + out])
+    SELECT "id" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Id.raw.txt") AS RawUpload FROM scope()
+
+- name: Groups
+  query: |
+    LET out = "/tmp/MacOS.Live.Sessions.Groups.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "groups > " + out])
+    SELECT "groups" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="Groups.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: Login sessions live
+  description: "Who is logged in right now (who, w), plus recent login history (last)."
+  questions:
+    - "Who is logged in at this instant?"
+    - "Were there recent SSH logins?"
+  requires:
+    - live
+  see_also: [utmpx, Users]

@@ -1,0 +1,37 @@
+name: MacOS.Live.USB
+description: |
+  Captures live USB device tree via system_profiler (JSON) and ioreg.
+  Useful for tracking currently-attached removable media during incident response.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+sources:
+- name: SystemProfilerUSB
+  query: |
+    LET out = "/tmp/MacOS.Live.USB.SystemProfilerUSB.raw.json"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "system_profiler SPUSBDataType -json > " + out])
+    SELECT "system_profiler SPUSBDataType -json" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="SystemProfilerUSB.raw.json") AS RawUpload FROM scope()
+
+- name: IoregUSB
+  query: |
+    LET out = "/tmp/MacOS.Live.USB.IoregUSB.raw.txt"
+    LET run = SELECT Stdout, Stderr, ReturnCode
+              FROM execve(argv=["/bin/sh", "-c", "ioreg -p IOUSB -w 0 > " + out])
+    SELECT "ioreg -p IOUSB -w 0" AS Command, run[0].ReturnCode AS ExitCode,
+           file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
+           upload(file=out, name="IoregUSB.raw.txt") AS RawUpload FROM scope()
+
+guide:
+  category: Volatile / Runtime
+  subcategory: USB devices live
+  description: |
+    Live USB device tree (system_profiler SPUSBDataType -json and ioreg) — what's attached right now.
+  questions:
+    - "What USB devices are connected right now?"
+    - "Is there an unexpected mass-storage device?"
+  requires:
+    - live

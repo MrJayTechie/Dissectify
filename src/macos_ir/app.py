@@ -40,6 +40,8 @@ from macos_ir.config import (
 from macos_ir.health import CollectionHealth, MISSING_REASONS
 from macos_ir.plugins import get_selected_functions
 from macos_ir.workbook import resolve_target, run_function, write_xlsx
+from macos_ir.guide import load_all as load_guide, GuideIndex, GuideEntry
+from macos_ir.search import WorkbookSearchIndex, SearchResults
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -291,11 +293,6 @@ class MacOSIRApp(App):
     #results-tabs {
         height: 1fr;
         margin: 0 1;
-        display: none;
-    }
-
-    #results-tabs.visible {
-        display: block;
     }
 
     #summary-card {
@@ -319,6 +316,20 @@ class MacOSIRApp(App):
 
     #progress-row ProgressBar {
         width: 1fr;
+    }
+
+    #guide-row, #search-row {
+        height: 3;
+        layout: horizontal;
+        padding: 0 1;
+    }
+
+    #guide-row Input, #search-row Input {
+        width: 1fr;
+    }
+
+    #guide-log, #search-log {
+        height: 1fr;
     }
 
     #progress-label {
@@ -356,6 +367,8 @@ class MacOSIRApp(App):
         self._health_result: dict | None = None
         self._xlsx_path: str | None = None
         self._cfg = load_config()
+        self._guide_index = None        # lazy-loaded on first Guide tab view
+        self._search_index = None       # lazy-loaded on first Search tab query
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -399,8 +412,7 @@ class MacOSIRApp(App):
             classes="step-label",
         )
         with Horizontal(id="button-bar-2"):
-            yield Button("Build Intel", id="btn-build-amd64", variant="success")
-            yield Button("Build Apple Silicon", id="btn-build-arm64", variant="success")
+            yield Button("Build Collector", id="btn-build-collector", variant="success")
             yield Button("Build Live", id="btn-build-live", variant="success")
             yield Button("Shell Collector", id="btn-shell", variant="success")
             yield Button("Collector Guide", id="btn-guide", variant="default")
@@ -414,13 +426,21 @@ class MacOSIRApp(App):
             yield Button("Health Check", id="btn-health", variant="primary")
             yield Button("Generate Workbook", id="btn-generate", variant="success", disabled=True)
             yield Button("Open XLSX", id="btn-open", variant="default", disabled=True)
-            yield Button("Include Slow", id="btn-slow", variant="warning")
+            yield Button("Slow: ON", id="btn-slow", variant="success")
 
         with TabbedContent(id="results-tabs"):
             with TabPane("Summary", id="tab-summary"):
                 yield RichLog(id="summary-card", highlight=True, markup=True)
             with TabPane("Artifacts", id="tab-artifacts"):
                 yield DataTable(id="health-table")
+            with TabPane("Guide", id="tab-guide"):
+                with Horizontal(id="guide-row"):
+                    yield Input(placeholder="Search questions (e.g. 'logins', 'command')", id="guide-search")
+                yield RichLog(id="guide-log", highlight=True, markup=True)
+            with TabPane("Search", id="tab-search"):
+                with Horizontal(id="search-row"):
+                    yield Input(placeholder="Search parsed records (IP / filename / hash / URL / process)", id="search-input")
+                yield RichLog(id="search-log", highlight=True, markup=True)
             with TabPane("Parse", id="tab-parse"):
                 with Horizontal(id="progress-row"):
                     yield ProgressBar(id="progress-bar", total=100)
@@ -446,6 +466,19 @@ class MacOSIRApp(App):
                 self._set_status(f"Plugins auto-detected: {detected}")
             else:
                 self._set_status("No plugins found — click 'Update Plugins' to download from GitHub")
+
+        # Render the guide overview eagerly so the Guide tab is populated on first view
+        try:
+            self._render_guide_overview()
+        except Exception:
+            pass
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Route Enter-key submits from the Guide and Search inputs."""
+        if event.input.id == "guide-search":
+            self._render_guide_search(event.value)
+        elif event.input.id == "search-input":
+            self._render_search(event.value)
 
     # ── Helpers ──
 
@@ -484,10 +517,8 @@ class MacOSIRApp(App):
             self._do_update_collectors()
         elif event.button.id == "btn-velo":
             self._do_download_velo()
-        elif event.button.id == "btn-build-amd64":
+        elif event.button.id == "btn-build-collector":
             self._do_build_collector("amd64")
-        elif event.button.id == "btn-build-arm64":
-            self._do_build_collector("arm64")
         elif event.button.id == "btn-build-live":
             self._do_build_live_collector()
         elif event.button.id == "btn-shell":
@@ -626,17 +657,19 @@ class MacOSIRApp(App):
 
     @work(thread=True, exclusive=True)
     def _do_build_collector(self, arch: str) -> None:
-        label = "Apple Silicon" if arch == "arm64" else "Intel"
-        btn_id = f"btn-build-{arch}"
+        # Always build the Intel (amd64) collector — it runs natively on Intel
+        # Macs and via Rosetta 2 on Apple Silicon. One binary covers both.
+        btn_id = "btn-build-collector"
 
-        self.call_from_thread(self._set_status, f"Building {label} collector...")
+        self.call_from_thread(self._set_status, "Building collector (amd64, runs on Intel + Apple Silicon via Rosetta)...")
         self.call_from_thread(self._set_btn, btn_id, True)
 
         # Show progress in the collector tab
         self.call_from_thread(self.query_one("#results-tabs", TabbedContent).add_class, "visible")
         log = self.query_one("#collector-log", RichLog)
         self.call_from_thread(log.clear)
-        self.call_from_thread(log.write, f"[bold cyan]Building {label} ({arch}) Collector[/]\n")
+        self.call_from_thread(log.write, "[bold cyan]Building Collector (amd64)[/]")
+        self.call_from_thread(log.write, "[dim]The amd64 collector runs natively on Intel Macs and via Rosetta 2 on Apple Silicon.[/]\n")
 
         def _progress(msg):
             self.call_from_thread(log.write, f"  [dim]{msg}[/]")
@@ -680,7 +713,7 @@ class MacOSIRApp(App):
             )
             self.call_from_thread(
                 self.notify,
-                f"{label} collector built in builds/",
+                "Collector built in builds/",
                 severity="information",
             )
 
@@ -730,7 +763,7 @@ class MacOSIRApp(App):
             self.call_from_thread(log.write, f"  [green]{collector_path}[/]")
             self.call_from_thread(log.write, "")
 
-            yaml_count = len(list(LIVE_COLLECTORS_DIR.glob("*.yaml"))) - 1  # exclude spec.yaml
+            yaml_count = len(list(LIVE_COLLECTORS_DIR.glob("*.yaml")))
             self.call_from_thread(log.write, f"[bold]Contains:[/] {yaml_count} MacOS.Live.* artifacts\n")
 
             self.call_from_thread(log.write, "[bold]Run on the target Mac (fast triage, 30–90 s):[/]")
@@ -798,7 +831,7 @@ class MacOSIRApp(App):
                 lines.append("")
 
         if not any_built:
-            lines.append("# No collectors built yet — click Build Intel / Build Apple Silicon / Build Live first")
+            lines.append("# No collectors built yet — click Build Collector / Build Live first")
             lines.append("")
 
         lines.extend([
@@ -906,7 +939,7 @@ class MacOSIRApp(App):
         log.write("  [cyan]https://github.com/Velocidex/velociraptor/releases[/]\n")
 
         log.write("[bold]Step 2: Build the collector[/]")
-        log.write("  Click 'Build Intel' or 'Build Apple Silicon' in Step 2 above")
+        log.write("  Click 'Build Collector' or 'Build Live' in Step 2 above")
         log.write("  This auto-generates spec.yaml and builds the collector binary\n")
 
         log.write("[bold]Step 3: Run on the target Mac[/]")
@@ -1004,6 +1037,127 @@ class MacOSIRApp(App):
             f"Health check complete: {summary['present']}/{summary['total_artifacts']} present, "
             f"FDA: {summary['fda_status']}"
         )
+
+    # ── Analysis Guide ──
+
+    def _ensure_guide_loaded(self) -> GuideIndex | None:
+        if self._guide_index is None:
+            try:
+                self._guide_index = load_guide()
+            except Exception as e:
+                self.notify(f"Guide load failed: {e}", severity="error")
+                return None
+        return self._guide_index
+
+    def _render_guide_overview(self) -> None:
+        idx = self._ensure_guide_loaded()
+        if idx is None:
+            return
+        log = self.query_one("#guide-log", RichLog)
+        log.clear()
+        log.write(f"[bold cyan]Analysis Guide[/] — {idx.annotated_count} artifacts across {len(idx.categories())} categories")
+        samples = idx.sample_keywords()
+        if samples:
+            log.write("[dim]Try searching: [/]" + "  ".join(f"[cyan]{k}[/]" for k in samples[:18]))
+        log.write("")
+        for cat in idx.categories():
+            subs = idx.by_category[cat]
+            total = sum(len(v) for v in subs.values())
+            log.write(f"[bold]{cat}[/]  ({total} artifacts)")
+            for sub, arts in sorted(subs.items()):
+                log.write(f"  [dim]·[/] {sub}: {', '.join(arts)}")
+            log.write("")
+
+    def _render_guide_search(self, term: str) -> None:
+        idx = self._ensure_guide_loaded()
+        if idx is None:
+            return
+        log = self.query_one("#guide-log", RichLog)
+        log.clear()
+        term = term.strip()
+        if not term:
+            self._render_guide_overview()
+            return
+        matches = idx.search_questions(term)
+        if not matches:
+            log.write(f"[yellow]No questions match '{term}'.[/]")
+            log.write("[dim]Try broader terms like 'login', 'command', 'install', 'network'.[/]")
+            return
+        log.write(f"[bold cyan]Guide search:[/] {len(matches)} question(s) match '{term}'\n")
+        for q in matches:
+            arts = idx.artifacts_for_question(q)
+            log.write(f"[bold]Q:[/] {q}")
+            for art_name in arts:
+                entry = idx.get(art_name)
+                if entry:
+                    desc = entry.description.splitlines()[0][:140]
+                    reqs = f" [yellow]({'/'.join(entry.requires)})[/]" if entry.requires else ""
+                    log.write(f"   [cyan]{art_name}[/]{reqs} — {desc}")
+                else:
+                    log.write(f"   [cyan]{art_name}[/]")
+            log.write("")
+
+    # ── Search (over generated workbook) ──
+
+    def _ensure_search_index(self) -> WorkbookSearchIndex | None:
+        """Build or return a cached WorkbookSearchIndex for the current xlsx."""
+        xlsx_path = self._xlsx_path or self.query_one("#output-input", Input).value.strip()
+        if not xlsx_path:
+            self.notify("No workbook available — Generate Workbook first", severity="warning")
+            return None
+        p = Path(xlsx_path)
+        if not p.is_file():
+            self.notify(f"Workbook not found: {xlsx_path} — Generate Workbook first", severity="warning")
+            return None
+        if self._search_index is None or Path(self._search_index.xlsx_path) != p:
+            self._search_index = WorkbookSearchIndex(p)
+        return self._search_index
+
+    def _render_search(self, term: str) -> None:
+        log = self.query_one("#search-log", RichLog)
+        log.clear()
+        term = term.strip()
+        if not term:
+            log.write("[dim]Type a value above (IP, filename, hash, URL, process) and press Enter.[/]")
+            return
+
+        index = self._ensure_search_index()
+        if index is None:
+            log.write("[yellow]No workbook loaded — click Generate Workbook first, then return here.[/]")
+            return
+
+        log.write(f"[bold cyan]Searching[/] for '{term}'...")
+        self._set_status(f"Building search index (first search only)...")
+        try:
+            results = index.query(term, max_per_sheet=50)
+        except Exception as e:
+            log.write(f"[red]Search failed: {e}[/]")
+            return
+
+        self._set_status(f"Search complete: {results.total_hits} hits in {results.sheet_count} artifacts")
+        log.clear()
+        log.write(
+            f"[bold]'{results.query}'[/] — {results.total_hits} hits across {results.sheet_count} artifacts"
+        )
+        log.write("")
+
+        guide_idx = self._ensure_guide_loaded()
+        for sheet, hits in sorted(results.hits_by_sheet.items(), key=lambda kv: -len(kv[1])):
+            entry = guide_idx.get(sheet) if guide_idx else None
+            blurb = ""
+            reqs = ""
+            if entry:
+                blurb = entry.description.splitlines()[0][:200]
+                if entry.requires:
+                    reqs = f" [yellow]({'/'.join(entry.requires)})[/]"
+            log.write(f"[bold cyan]{sheet}[/] · {len(hits)} hits{reqs}")
+            if blurb:
+                log.write(f"  [dim]{blurb}[/]")
+            for hit in hits[:5]:
+                log.write(f"  [green]row {hit.row}[/] {hit.preview}")
+            if len(hits) > 5:
+                log.write(f"  [dim]... and {len(hits) - 5} more[/]")
+            log.write("")
 
     # ── Workbook generation ──
 
