@@ -12,7 +12,8 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.suggester import Suggester
 from textual.widgets import (
     Button,
@@ -23,14 +24,17 @@ from textual.widgets import (
     Label,
     ProgressBar,
     RichLog,
+    SelectionList,
     Static,
     TabbedContent,
     TabPane,
 )
+from textual.widgets.selection_list import Selection
 
 from macos_ir.config import (
     update_plugins, update_collectors, download_velociraptor, build_collector,
-    build_live_collector,
+    build_live_collector, build_unified_log_collector,
+    get_unified_log_collector_binary,
     get_plugin_path, get_collector_path, get_velo_binaries, get_run_command,
     get_shell_collector, get_live_collector_binary,
     load_config, save_config,
@@ -185,6 +189,220 @@ def _build_summary_card(result: dict) -> str:
 
     lines.append("")
     return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Unified Log catalog + modal
+# ──────────────────────────────────────────────────────────────────────────────
+
+# (name, tier, short description) — mirrors the Predicates table baked into
+# Collector Yaml FIles/UnifiedLog.yaml. Order is preserved in the modal.
+UNIFIED_LOG_CATEGORIES: list[tuple[str, str, str]] = [
+    # Fast set — IR-critical
+    ("auth_loginwindow",     "Fast", "Login window events"),
+    ("auth_session_events",  "Fast", "Shutdown / logout / restart"),
+    ("auth_session_login",   "Fast", "Exact user-login moments"),
+    ("auth_screen_lock",     "Fast", "Screen lock / unlock state"),
+    ("auth_method",          "Fast", "Auth method (TouchID / password / Watch)"),
+    ("auth_result",          "Fast", "Lock-screen auth success / failure"),
+    ("auth_sudo",            "Fast", "Sudo invocations + PAM"),
+    ("auth_authd",           "Fast", "Authentication daemon events"),
+    ("auth_securityd",       "Fast", "Keychain unlock, cert validation"),
+    ("auth_opendirectory",   "Fast", "Directory service auth (incl. AD/LDAP)"),
+    ("ssh",                  "Fast", "SSH connections, accept / error"),
+    ("screensharing_in",     "Fast", "Inbound screen sharing"),
+    ("screensharing_out",    "Fast", "Outbound Screen Sharing"),
+    ("gatekeeper",           "Fast", "Quarantine / exec policy decisions"),
+    ("tcc",                  "Fast", "TCC permission events"),
+    ("tcc_updates",          "Fast", "User changed app TCC permissions"),
+    ("xprotect",             "Fast", "Apple's malware scanner"),
+    # Full set — heavier additions
+    ("kernel",               "Full", "Kernel events"),
+    ("kernel_panic",         "Full", "Kernel panics + kext loads"),
+    ("launchd",              "Full", "Service start / stop"),
+    ("firewall",             "Full", "ALF inbound / outbound block events"),
+    ("network",              "Full", "Network subsystem events"),
+    ("proxy",                "Full", "Proxy config changes via configd"),
+    ("vpn",                  "Full", "VPN / NetworkExtension / nehelper"),
+    ("wifi",                 "Full", "SSID associations, scans"),
+    ("bluetooth",            "Full", "Bluetooth pairings / connections"),
+    ("wirelessproxd",        "Full", "Apple Watch unlock / proximity"),
+    ("airdrop",              "Full", "AirDrop / continuity transfers"),
+    ("mdns",                 "Full", "Local network discovery"),
+    ("rapportd",             "Full", "Continuity / device handoff"),
+    ("usb_disk",             "Full", "USB device + disk mount events"),
+    ("spotlight",            "Full", "File indexing"),
+    ("timemachine",          "Full", "Time Machine backups"),
+    ("media",                "Full", "Media playback (MediaRemote)"),
+    ("crashes",              "Full", "Process crashes + spindump"),
+    ("softwareupdate",       "Full", "OS update activity"),
+    ("power",                "Full", "Sleep / wake events"),
+]
+
+FAST_CATEGORY_NAMES = {n for n, t, _ in UNIFIED_LOG_CATEGORIES if t == "Fast"}
+
+
+class UnifiedLogModal(ModalScreen[dict | None]):
+    """Modal form for configuring the Unified Log collector.
+
+    Returns a dict with keys (hours, categories, predicate) on submit, or
+    None on cancel.
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    DEFAULT_CSS = """
+    UnifiedLogModal {
+        align: center middle;
+    }
+
+    #ulog-modal {
+        width: 92;
+        height: 38;
+        background: $panel;
+        border: thick $accent;
+        padding: 1 2;
+    }
+
+    #ulog-modal .modal-title {
+        height: 1;
+        content-align: center middle;
+        color: $accent;
+        text-style: bold;
+    }
+
+    #ulog-modal .modal-hint {
+        height: 1;
+        color: $text-muted;
+    }
+
+    #ulog-modal #ulog-window-row {
+        height: 3;
+        align: left middle;
+    }
+
+    #ulog-modal #ulog-window-row Label {
+        height: 3;
+        content-align: center middle;
+        margin: 0 1;
+    }
+
+    #ulog-modal #ulog-window-row Input {
+        width: 8;
+        margin: 0 1;
+    }
+
+    #ulog-modal #ulog-quick-row {
+        height: 3;
+        align: left middle;
+    }
+
+    #ulog-modal #ulog-quick-row Button {
+        margin: 0 1;
+        min-width: 14;
+    }
+
+    #ulog-modal #ulog-cats {
+        height: 18;
+        border: solid $primary;
+    }
+
+    #ulog-modal #ulog-predicate {
+        height: 3;
+        margin: 1 0 0 0;
+    }
+
+    #ulog-modal #ulog-action-row {
+        height: 3;
+        align: right middle;
+        margin: 1 0 0 0;
+    }
+
+    #ulog-modal #ulog-action-row Button {
+        margin: 0 1;
+        min-width: 14;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="ulog-modal"):
+            yield Static("Unified Log Collection", classes="modal-title")
+            yield Static(
+                "Pick a window, then check categories to collect. "
+                "Use the quick presets below for common selections.",
+                classes="modal-hint",
+            )
+
+            with Horizontal(id="ulog-window-row"):
+                yield Label("Last")
+                yield Input(value="24", id="ulog-hours")
+                yield Label("hours")
+
+            with Horizontal(id="ulog-quick-row"):
+                yield Button("Select Fast (17)", id="ulog-quick-fast")
+                yield Button("Select Full (37)", id="ulog-quick-full")
+                yield Button("Clear", id="ulog-quick-clear")
+
+            options = [
+                Selection(
+                    f"[{tier}]  {name}  —  {desc}",
+                    name,
+                    tier == "Fast",   # Fast pre-checked by default
+                )
+                for name, tier, desc in UNIFIED_LOG_CATEGORIES
+            ]
+            yield SelectionList[str](*options, id="ulog-cats")
+
+            yield Input(
+                placeholder="Optional free-form predicate (e.g. process == \"mdmclient\")",
+                id="ulog-predicate",
+            )
+
+            with Horizontal(id="ulog-action-row"):
+                yield Button("Cancel", id="ulog-cancel")
+                yield Button("Build", variant="success", id="ulog-build")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id
+        cats: SelectionList = self.query_one("#ulog-cats", SelectionList)
+
+        if bid == "ulog-quick-fast":
+            cats.deselect_all()
+            for name in FAST_CATEGORY_NAMES:
+                cats.select(name)
+            event.stop()
+        elif bid == "ulog-quick-full":
+            cats.select_all()
+            event.stop()
+        elif bid == "ulog-quick-clear":
+            cats.deselect_all()
+            event.stop()
+        elif bid == "ulog-cancel":
+            self.dismiss(None)
+        elif bid == "ulog-build":
+            hours_raw = self.query_one("#ulog-hours", Input).value.strip() or "24"
+            try:
+                hours = int(hours_raw)
+                if hours <= 0:
+                    raise ValueError
+            except ValueError:
+                self.notify(f"Invalid hours value: {hours_raw!r}", severity="error")
+                return
+            selected = list(cats.selected)
+            predicate = self.query_one("#ulog-predicate", Input).value.strip()
+            if not selected and not predicate:
+                self.notify("Pick at least one category or enter a predicate.", severity="warning")
+                return
+            self.dismiss({
+                "hours": hours,
+                "categories": selected,
+                "predicate": predicate,
+            })
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -414,9 +632,11 @@ class MacOSIRApp(App):
         with Horizontal(id="button-bar-2"):
             yield Button("Build Collector", id="btn-build-collector", variant="success")
             yield Button("Build Live", id="btn-build-live", variant="success")
+            yield Button("Build Unified Log", id="btn-build-ulog", variant="success")
             yield Button("Shell Collector", id="btn-shell", variant="success")
             yield Button("Collector Guide", id="btn-guide", variant="default")
             yield Button("Copy Commands", id="btn-copy", variant="default")
+
 
         yield Static(
             "[bold cyan]STEP 3:[/] Analyze — Health Check & Export",
@@ -545,6 +765,8 @@ class MacOSIRApp(App):
             self._do_build_collector("amd64")
         elif event.button.id == "btn-build-live":
             self._do_build_live_collector()
+        elif event.button.id == "btn-build-ulog":
+            self._open_unified_log_modal()
         elif event.button.id == "btn-shell":
             self._show_shell_collector()
         elif event.button.id == "btn-guide":
@@ -820,6 +1042,124 @@ class MacOSIRApp(App):
         if not built and errors:
             self.call_from_thread(self._set_status, f"Live build failed: {errors[0]}")
             self.call_from_thread(self.notify, f"Live build failed: {errors[0]}", severity="error")
+
+        self.call_from_thread(self._set_btn, btn_id, False)
+        self.call_from_thread(
+            setattr, self.query_one("#results-tabs", TabbedContent), "active", "tab-collector"
+        )
+
+    # ── Build unified-log collector ──
+
+    def _open_unified_log_modal(self) -> None:
+        """Open the modal; on submit, kick off the build worker."""
+        def _on_close(result: dict | None) -> None:
+            if result is None:
+                return
+            self._do_build_unified_log(
+                hours=result["hours"],
+                categories=result["categories"],
+                predicate=result["predicate"],
+            )
+
+        self.push_screen(UnifiedLogModal(), _on_close)
+
+    @work(thread=True, exclusive=True)
+    def _do_build_unified_log(
+        self,
+        hours: int,
+        categories: list[str],
+        predicate: str,
+    ) -> None:
+        btn_id = "btn-build-ulog"
+
+        # Compute absolute window from "Last N hours".
+        from datetime import datetime, timedelta, timezone
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(hours=hours)
+        start_iso = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Decide preset based on what the modal returned. If the selection
+        # exactly matches Fast or Full, use the preset name (smaller spec).
+        # Otherwise pass the explicit list as a comma-separated Custom set.
+        all_names = {n for n, _, _ in UNIFIED_LOG_CATEGORIES}
+        sel_set = set(categories)
+        if sel_set == FAST_CATEGORY_NAMES:
+            preset, custom = "Fast", ""
+        elif sel_set == all_names:
+            preset, custom = "Full", ""
+        else:
+            preset, custom = "Custom", ",".join(categories)
+
+        self.call_from_thread(
+            self._set_status,
+            f"Building Unified Log collector ({preset}, last {hours}h)..."
+        )
+        self.call_from_thread(self._set_btn, btn_id, True)
+
+        self.call_from_thread(self.query_one("#results-tabs", TabbedContent).add_class, "visible")
+        log = self.query_one("#collector-log", RichLog)
+        self.call_from_thread(log.clear)
+        self.call_from_thread(log.write, "[bold cyan]Building Unified Log Collector[/]")
+        self.call_from_thread(log.write, f"[dim]Window: {start_iso} → {end_iso}  |  Preset: {preset}[/]")
+        if custom:
+            self.call_from_thread(log.write, f"[dim]Custom categories: {custom}[/]")
+        self.call_from_thread(log.write, "")
+
+        def _progress(msg):
+            self.call_from_thread(log.write, f"  [dim]{msg}[/]")
+            self.call_from_thread(self._set_status, msg)
+
+        import platform
+        local_arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "amd64"
+
+        built, errors = build_unified_log_collector(
+            start_iso=start_iso,
+            end_iso=end_iso,
+            preset=preset,
+            custom_categories=custom,
+            predicate=predicate,
+            arch=local_arch,
+            progress_cb=_progress,
+        )
+
+        if built:
+            collector_path = built[0]
+            velo_bins = get_velo_binaries()
+            velo_bin = next((b for b in velo_bins if local_arch in b.name), None)
+            velo_name = velo_bin.name if velo_bin else f"velociraptor-darwin-{local_arch}"
+
+            self.call_from_thread(log.write, "")
+            self.call_from_thread(log.write, "[bold green]Unified Log collector built:[/]")
+            self.call_from_thread(log.write, f"  [green]{collector_path}[/]")
+            self.call_from_thread(log.write, "")
+            self.call_from_thread(log.write, "[bold]Run on the target Mac:[/]")
+            self.call_from_thread(
+                log.write,
+                f"  [green]sudo ./{velo_name} -- --embedded_config {collector_path}[/]"
+            )
+            self.call_from_thread(log.write, "")
+            self.call_from_thread(
+                log.write,
+                "  [dim]Window + categories are baked in — responder runs it as-is, "
+                "output zip lands in /tmp.[/]"
+            )
+            self.call_from_thread(
+                self._set_status,
+                f"Unified Log collector built: {Path(collector_path).name}"
+            )
+            self.call_from_thread(
+                self.notify,
+                "Unified Log collector built in builds/",
+                severity="information",
+            )
+
+        for e in errors:
+            self.call_from_thread(log.write, f"\n  [red]ERROR: {e}[/]")
+
+        if not built and errors:
+            self.call_from_thread(self._set_status, f"Unified Log build failed: {errors[0]}")
+            self.call_from_thread(self.notify, f"Unified Log build failed: {errors[0]}", severity="error")
 
         self.call_from_thread(self._set_btn, btn_id, False)
         self.call_from_thread(

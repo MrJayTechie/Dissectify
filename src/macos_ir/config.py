@@ -327,11 +327,20 @@ def get_velo_binaries() -> list[Path]:
 BUILD_DIR = PROJECT_ROOT / "builds"
 COLLECTED_DIR = PROJECT_ROOT / "collected-artifacts"
 
+# Live artifacts that take required parameters (window, preset, etc.) and
+# so can't be baked into the live spec with default `{}`. They each have
+# their own dedicated build button and spec generator. Excluded from
+# `_generate_live_spec()` and `build_live_collector()`.
+SPECIAL_ARTIFACTS: set[str] = {"UnifiedLog"}
+
 
 def _generate_spec() -> Path:
     """Auto-generate spec.yaml from YAML files in collectors/."""
     spec = COLLECTORS_DIR / "spec.yaml"
-    yamls = sorted([f.stem for f in COLLECTORS_DIR.glob("*.yaml") if f.stem != "spec"])
+    yamls = sorted([
+        f.stem for f in COLLECTORS_DIR.glob("*.yaml")
+        if f.stem != "spec"
+    ])
 
     lines = ["OS: Generic", "Artifacts:"]
     for name in yamls:
@@ -370,7 +379,10 @@ def _generate_spec() -> Path:
 def _generate_live_spec() -> Path:
     """Auto-generate live_spec.yaml from YAML files in collectors_live/."""
     spec = LIVE_COLLECTORS_DIR / "spec.yaml"
-    yamls = sorted([f.stem for f in LIVE_COLLECTORS_DIR.glob("*.yaml") if f.stem != "spec"])
+    yamls = sorted([
+        f.stem for f in LIVE_COLLECTORS_DIR.glob("*.yaml")
+        if f.stem != "spec" and f.stem not in SPECIAL_ARTIFACTS
+    ])
 
     lines = ["OS: Generic", "Artifacts:"]
     for name in yamls:
@@ -580,7 +592,10 @@ def build_live_collector(arch: str | None = None, progress_cb=None) -> tuple[lis
     Returns (built_paths, errors).
     """
     yamls = list(LIVE_COLLECTORS_DIR.glob("*.yaml")) if LIVE_COLLECTORS_DIR.is_dir() else []
-    artifact_yamls = [y for y in yamls if y.stem != "spec"]
+    artifact_yamls = [
+        y for y in yamls
+        if y.stem != "spec" and y.stem not in SPECIAL_ARTIFACTS
+    ]
     if not artifact_yamls:
         return [], [
             "No live YAML artifacts found in collectors_live/ — "
@@ -686,3 +701,217 @@ def build_live_collector(arch: str | None = None, progress_cb=None) -> tuple[lis
             errors.append(f"{b_arch}: {e}")
 
     return built, errors
+
+
+# ── Build unified-log collector ──
+#
+# UnifiedLog.yaml is a LIVE artifact — `log show` only works on a running
+# system, not a forensic image. It takes required parameters (window + preset
+# + optional custom categories / free-form predicate), so it can't be folded
+# into the live spec (which uses default `{}`). It lives in collectors_live/
+# but is excluded from `_generate_live_spec()` via SPECIAL_ARTIFACTS, and
+# gets its own dedicated build path here.
+
+UNIFIED_LOG_ARTIFACT = "MacOS.Live.UnifiedLog"
+
+
+def _generate_unified_log_spec(
+    start_iso: str,
+    end_iso: str,
+    preset: str,
+    custom_categories: str = "",
+    predicate: str = "",
+    length: int = 100_000_000,
+) -> Path:
+    """Build a single-artifact spec for the unified-log collector.
+
+    Inputs are baked into the resulting offline collector; the responder runs
+    it as-is, no parameters needed at execution time.
+    """
+    spec = LIVE_COLLECTORS_DIR / "spec_unified_log.yaml"
+
+    # Velociraptor v0.76.2 offline-collector spec: parameters live as a
+    # nested mapping under each artifact name. All values must be strings.
+    # Empirically verified end-to-end (run /tmp/test_collector_v76_2):
+    # parameters reach the artifact and timestamps are honored. Other
+    # variants (top-level Parameters.env, Specs[] block) parse but are
+    # silently ignored at runtime, producing 0001-01-01 zero-time windows.
+    def q(s: str) -> str:
+        return '"' + s.replace('"', '\\"') + '"'
+
+    lines = [
+        "OS: Generic",
+        "Artifacts:",
+        f"  {UNIFIED_LOG_ARTIFACT}:",
+        f"    StartDate: {q(start_iso)}",
+        f"    EndDate: {q(end_iso)}",
+        f"    Preset: {q(preset)}",
+        f"    CustomCategories: {q(custom_categories)}",
+        f"    Predicate: {q(predicate)}",
+        f'    Length: "{int(length)}"',
+        "Target: ZIP",
+        "EncryptionScheme: None",
+        "EncryptionArgs:",
+        '  public_key: ""',
+        '  password: ""',
+        "OptVerbose: true",
+        "OptBanner: true",
+        "OptPrompt: false",
+        "OptAdmin: true",
+        "OptTempdir: /tmp",
+        "OptLevel: 5",
+        "OptConcurrency: 4",
+        "OptFormat: jsonl",
+        "OptOutputDirectory: /tmp",
+        "OptFilenameTemplate: UnifiedLog-%Hostname%-%TIMESTAMP%",
+        'OptCollectorFilename: ""',
+        "OptCpuLimit: 0",
+        "OptProgressTimeout: 3600",
+        "OptTimeout: 0",
+        "OptDeleteAtExit: false",
+        "",
+    ]
+    spec.write_text("\n".join(lines))
+    return spec
+
+
+def build_unified_log_collector(
+    start_iso: str,
+    end_iso: str,
+    preset: str = "Fast",
+    custom_categories: str = "",
+    predicate: str = "",
+    length: int = 100_000_000,
+    arch: str | None = None,
+    progress_cb=None,
+) -> tuple[list[str], list[str]]:
+    """Build a single-artifact unified-log offline collector.
+
+    Outputs Collector-UnifiedLog-darwin-<arch> in builds/ so it coexists with
+    the main and live collectors.
+    """
+    yaml_path = LIVE_COLLECTORS_DIR / "UnifiedLog.yaml"
+    if not yaml_path.exists():
+        return [], [
+            "UnifiedLog.yaml not found in collectors_live/ — "
+            "click 'Update Collectors' first to pull it from GitHub"
+        ]
+
+    if not start_iso or not end_iso:
+        return [], ["StartDate and EndDate are required"]
+
+    if progress_cb:
+        progress_cb(f"Generating unified-log spec ({preset}, {start_iso} → {end_iso})...")
+    spec = _generate_unified_log_spec(
+        start_iso=start_iso,
+        end_iso=end_iso,
+        preset=preset,
+        custom_categories=custom_categories,
+        predicate=predicate,
+        length=length,
+    )
+
+    binaries = get_velo_binaries()
+    if not binaries:
+        return [], ["No velociraptor binaries found — click 'Download Velociraptor' first"]
+
+    if arch:
+        binaries = [b for b in binaries if _binary_arch(b) == arch]
+        if not binaries:
+            return [], [f"No {arch} binary found — download it first"]
+
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    local_arch = _get_local_arch()
+
+    built: list[str] = []
+    errors: list[str] = []
+
+    for binary in binaries:
+        b_arch = _binary_arch(binary)
+        is_native = b_arch == local_arch
+        output = BUILD_DIR / f"Collector-UnifiedLog-darwin-{b_arch}"
+
+        if progress_cb:
+            label = f"{b_arch} (native)" if is_native else f"{b_arch} (cross-arch)"
+            progress_cb(f"Building unified-log collector for {label}...")
+
+        try:
+            result = subprocess.run(
+                [
+                    str(binary),
+                    "--definitions", str(LIVE_COLLECTORS_DIR),
+                    "collector", str(spec),
+                ],
+                capture_output=True, text=True, timeout=120,
+            )
+
+            if result.returncode != 0:
+                stderr_lines = result.stderr.strip().splitlines()
+                error_lines = [l for l in stderr_lines if "[ERROR]" in l or "error:" in l.lower()]
+                err_msg = error_lines[-1] if error_lines else (stderr_lines[-1] if stderr_lines else f"exit {result.returncode}")
+                err_msg = err_msg[:200]
+                if "bad cpu" in result.stderr.lower():
+                    if b_arch == "amd64":
+                        errors.append(
+                            f"{b_arch}: Cannot run Intel binary on this Mac. "
+                            "Install Rosetta (softwareupdate --install-rosetta)."
+                        )
+                    else:
+                        errors.append(f"{b_arch}: Cannot run ARM binary on Intel Mac.")
+                else:
+                    errors.append(f"{b_arch}: {err_msg}")
+                continue
+
+            collector_path = None
+            try:
+                stdout = result.stdout.strip()
+                if stdout:
+                    data = json.loads(stdout)
+                    if isinstance(data, list) and data:
+                        repacked = data[0].get("Repacked", {})
+                        collector_path = repacked.get("Path")
+            except Exception:
+                pass
+
+            if collector_path and Path(collector_path).exists():
+                Path(collector_path).chmod(0o755)
+                shutil.move(collector_path, str(output))
+                built.append(str(output))
+            else:
+                for search in [Path.home() / "gui_datastore", Path("/var/folders")]:
+                    found = list(search.rglob("Collector_*")) if search.exists() else []
+                    if found:
+                        src = max(found, key=lambda f: f.stat().st_mtime)
+                        src.chmod(0o755)
+                        shutil.move(str(src), str(output))
+                        built.append(str(output))
+                        break
+                else:
+                    errors.append(f"{b_arch}: Build ran but collector file not found")
+
+        except OSError as e:
+            if "bad cpu type" in str(e).lower() or e.errno == 86:
+                if b_arch == "amd64":
+                    errors.append(
+                        f"{b_arch}: Cannot run Intel binary on this Mac. "
+                        "Install Rosetta: softwareupdate --install-rosetta"
+                    )
+                else:
+                    errors.append(f"{b_arch}: Cannot run ARM binary on Intel Mac.")
+            else:
+                errors.append(f"{b_arch}: {e}")
+        except Exception as e:
+            errors.append(f"{b_arch}: {e}")
+
+    return built, errors
+
+
+def get_unified_log_collector_binary() -> str | None:
+    """Return the path to the built unified-log collector matching this Mac's arch."""
+    local = _get_local_arch()
+    collector = BUILD_DIR / f"Collector-UnifiedLog-darwin-{local}"
+    if collector.exists():
+        return str(collector)
+    for f in BUILD_DIR.glob("Collector-UnifiedLog-darwin-*"):
+        return str(f)
+    return None
