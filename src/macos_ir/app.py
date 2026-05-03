@@ -37,6 +37,7 @@ from macos_ir.config import (
     get_unified_log_collector_binary,
     get_plugin_path, get_collector_path, get_velo_binaries, get_run_command,
     get_shell_collector, get_live_collector_binary,
+    check_velociraptor_compatibility,
     load_config, save_config,
     COLLECTORS_DIR, LIVE_COLLECTORS_DIR, PLUGINS_DIR, VELO_DIR, BUILD_DIR,
     COLLECTED_DIR, SHELL_COLLECTOR,
@@ -896,6 +897,19 @@ class MacOSIRApp(App):
             )
             if err:
                 self.call_from_thread(self.notify, f"Partial error: {err}", severity="warning")
+
+            # Warn if a downloaded binary breaks the unified-log path.
+            warn = check_velociraptor_compatibility()
+            if warn:
+                self.call_from_thread(log.write, "")
+                self.call_from_thread(log.write, "[bold yellow]Unified Log compatibility warning[/]")
+                self.call_from_thread(log.write, f"  [yellow]{warn}[/]")
+                self.call_from_thread(
+                    self.notify,
+                    "Build Unified Log may produce empty windows with this Velociraptor version — see collector log.",
+                    severity="warning",
+                    timeout=10,
+                )
 
         self.call_from_thread(self._set_btn, "btn-velo", False)
 
