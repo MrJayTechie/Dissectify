@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import platform
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -321,57 +320,6 @@ def get_velo_binaries() -> list[Path]:
     if not VELO_DIR.is_dir():
         return []
     return sorted([f for f in VELO_DIR.iterdir() if f.name.startswith("velociraptor") and f.is_file()])
-
-
-# Known-good Velociraptor version for the unified-log collector. Newer
-# versions silently fail to propagate artifact parameters from the offline
-# spec to the runtime, so StartDate/EndDate end up empty and `log show`
-# runs with a 0001-01-01 zero-time window. v0.76.2 is the last release
-# verified to route parameters correctly.
-UNIFIED_LOG_KNOWN_GOOD_VELOCIRAPTOR = "v0.76.2"
-
-
-def _version_tuple(v: str) -> tuple[int, ...]:
-    return tuple(int(x) for x in v.lstrip("v").split("."))
-
-
-def check_velociraptor_compatibility() -> str | None:
-    """Return a warning string if any downloaded velociraptor binary is
-    newer than the known-good version for the unified-log collector. Returns
-    None if all binaries are <= the known-good version (or none are present).
-    """
-    binaries = get_velo_binaries()
-    if not binaries:
-        return None
-
-    good = _version_tuple(UNIFIED_LOG_KNOWN_GOOD_VELOCIRAPTOR)
-    incompatible = set()
-    for b in binaries:
-        m = re.search(r"velociraptor-(v\d+\.\d+\.\d+)", b.name)
-        if not m:
-            continue
-        ver = m.group(1)
-        try:
-            if _version_tuple(ver) > good:
-                incompatible.add(ver)
-        except ValueError:
-            continue
-
-    if not incompatible:
-        return None
-
-    versions = ", ".join(sorted(incompatible))
-    return (
-        f"Detected velociraptor {versions}. The Build Unified Log path "
-        f"silently produces empty time-window collectors on releases newer "
-        f"than {UNIFIED_LOG_KNOWN_GOOD_VELOCIRAPTOR} — parameters baked into "
-        f"the spec aren't propagated to the artifact at runtime. "
-        f"Recommended: download {UNIFIED_LOG_KNOWN_GOOD_VELOCIRAPTOR} "
-        f"manually from "
-        f"https://github.com/Velocidex/velociraptor/releases/tag/"
-        f"{UNIFIED_LOG_KNOWN_GOOD_VELOCIRAPTOR} "
-        f"and replace the binaries in velociraptor/."
-    )
 
 
 # ── Build collector ──

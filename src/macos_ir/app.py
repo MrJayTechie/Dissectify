@@ -37,7 +37,6 @@ from macos_ir.config import (
     get_unified_log_collector_binary,
     get_plugin_path, get_collector_path, get_velo_binaries, get_run_command,
     get_shell_collector, get_live_collector_binary,
-    check_velociraptor_compatibility,
     load_config, save_config,
     COLLECTORS_DIR, LIVE_COLLECTORS_DIR, PLUGINS_DIR, VELO_DIR, BUILD_DIR,
     COLLECTED_DIR, SHELL_COLLECTOR,
@@ -898,19 +897,6 @@ class MacOSIRApp(App):
             if err:
                 self.call_from_thread(self.notify, f"Partial error: {err}", severity="warning")
 
-            # Warn if a downloaded binary breaks the unified-log path.
-            warn = check_velociraptor_compatibility()
-            if warn:
-                self.call_from_thread(log.write, "")
-                self.call_from_thread(log.write, "[bold yellow]Unified Log compatibility warning[/]")
-                self.call_from_thread(log.write, f"  [yellow]{warn}[/]")
-                self.call_from_thread(
-                    self.notify,
-                    "Build Unified Log may produce empty windows with this Velociraptor version — see collector log.",
-                    severity="warning",
-                    timeout=10,
-                )
-
         self.call_from_thread(self._set_btn, "btn-velo", False)
 
     # ── Build collector ──
@@ -1143,20 +1129,22 @@ class MacOSIRApp(App):
             velo_bin = next((b for b in velo_bins if local_arch in b.name), None)
             velo_name = velo_bin.name if velo_bin else f"velociraptor-darwin-{local_arch}"
 
+            collector_name = Path(collector_path).name
             self.call_from_thread(log.write, "")
             self.call_from_thread(log.write, "[bold green]Unified Log collector built:[/]")
             self.call_from_thread(log.write, f"  [green]{collector_path}[/]")
             self.call_from_thread(log.write, "")
-            self.call_from_thread(log.write, "[bold]Run on the target Mac:[/]")
+            self.call_from_thread(log.write, "[bold]Run on the target Mac (direct execution — recommended):[/]")
             self.call_from_thread(
                 log.write,
-                f"  [green]sudo ./{velo_name} -- --embedded_config {collector_path}[/]"
+                f"  [green]sudo ./{collector_name}[/]"
             )
             self.call_from_thread(log.write, "")
             self.call_from_thread(
                 log.write,
-                "  [dim]Window + categories are baked in — responder runs it as-is, "
-                "output zip lands in /tmp.[/]"
+                "  [dim]The collector is self-contained. Running it directly uses the "
+                "embedded velociraptor binary, so build-time and run-time versions match — "
+                "important for parameter propagation. Window + categories are baked in.[/]"
             )
             self.call_from_thread(
                 self._set_status,
