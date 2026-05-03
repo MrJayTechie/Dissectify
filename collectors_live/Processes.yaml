@@ -48,17 +48,3 @@ sources:
            run[0].Stderr AS Stderr,
            upload(file=out, name="LsofHandles.raw.txt") AS RawUpload
     FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Processes
-  description: |
-    Live process listing: ps with args, ps with environment variables, and lsof file-handle list.
-  questions:
-    - "What is running on this Mac right now?"
-    - "What files does a process have open?"
-    - "What environment variables did the attacker inject?"
-  requires:
-    - live
-    - sudo
-  see_also: [Network, Launchd, CodeIntegrity]

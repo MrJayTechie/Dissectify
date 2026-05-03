@@ -73,16 +73,3 @@ sources:
     SELECT "socketfilterfw --getstealthmode" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="FirewallStealth.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Runtime security flags
-  description: |
-    Runtime values of Gatekeeper (spctl), SIP (csrutil), FileVault (fdesetup), NVRAM boot-args, and the Application Firewall.
-  questions:
-    - "Is SIP disabled right now?"
-    - "Is Gatekeeper or FileVault off?"
-    - "Are boot-args tampered?"
-  requires:
-    - live
-  see_also: [FirewallConfiguration, TCC]

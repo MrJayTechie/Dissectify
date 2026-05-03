@@ -28,16 +28,3 @@ sources:
            run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="CodesignPerBinary.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Code signing live
-  description: |
-    codesign -dv, spctl -a, and sha256 for every unique executable currently running. Surfaces unsigned / adhoc / tampered binaries in real time.
-  questions:
-    - "Are any unsigned processes running right now?"
-    - "Is a running binary ad-hoc signed?"
-    - "What's the hash of a suspicious process?"
-  requires:
-    - live
-  see_also: [Processes, SecurityPosture]

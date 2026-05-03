@@ -17,14 +17,3 @@ sources:
            run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="SystemProfiler.raw.json") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Hardware info
-  description: "Live hardware/OS/storage snapshot via system_profiler -json."
-  questions:
-    - "What hardware is this Mac?"
-    - "What OS build is running right now?"
-    - "What storage devices are attached?"
-  requires:
-    - live

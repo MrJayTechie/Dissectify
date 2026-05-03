@@ -43,15 +43,3 @@ sources:
     SELECT "launchctl print-disabled system" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="LaunchctlPrintDisabled.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Persistence live state
-  description: |
-    Live launchd state — which services are loaded/disabled/running, with runtime metadata not present in the .plist files on disk.
-  questions:
-    - "Which launchd services are running right now?"
-    - "Has a daemon been disabled to kill defenses?"
-  requires:
-    - live
-  see_also: [Autostart]

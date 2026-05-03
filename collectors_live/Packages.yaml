@@ -26,14 +26,3 @@ sources:
     SELECT "pkgutil --pkg-info (per pkg, shell loop)" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="PkgutilInfoPerPkg.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Installed packages
-  description: |
-    Live query via pkgutil — installed pkg identifiers plus per-pkg metadata.
-  questions:
-    - "What packages are installed via pkgutil right now?"
-  requires:
-    - live
-  see_also: [InstallHistory, SoftwareInstallationUpdates]

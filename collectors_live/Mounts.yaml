@@ -51,15 +51,3 @@ sources:
     SELECT "tmutil latestbackup" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="TmutilLatest.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Volumes live
-  description: |
-    Live volume state: mount, diskutil list/apfs, and tmutil Time Machine inventory.
-  questions:
-    - "What volumes are mounted right now?"
-    - "Is a DMG or external drive attached?"
-    - "When is the latest Time Machine backup?"
-  requires:
-    - live

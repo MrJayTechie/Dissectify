@@ -52,14 +52,3 @@ sources:
     SELECT "sysctl -a" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="Sysctl.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Power + memory
-  description: |
-    pmset state and recent power log tail, plus uptime, vm_stat, sysctl. Kernel counters + power events from right now.
-  questions:
-    - "When did the Mac last wake / sleep?"
-    - "What is current memory pressure and load?"
-  requires:
-    - live

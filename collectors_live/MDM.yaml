@@ -26,16 +26,3 @@ sources:
     SELECT "profiles show -type enrollment" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="ProfilesEnrollment.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: MDM live state
-  description: |
-    Runtime MDM enrollment query via the profiles command — what mdmclient currently considers enrolled.
-  questions:
-    - "Is the Mac currently MDM-enrolled?"
-    - "Is enrollment supervised (DEP)?"
-  requires:
-    - live
-    - sudo
-  see_also: [ManagedDeviceProfile]

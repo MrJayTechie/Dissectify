@@ -96,17 +96,3 @@ sources:
     SELECT "pfctl -s all" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="PfctlAll.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Network sockets
-  description: |
-    Live network state: open sockets (lsof -i / netstat), routing, ARP, DNS resolver config, pf rules.
-  questions:
-    - "What connections are open right now?"
-    - "Is there a listening backdoor?"
-    - "Has DNS been hijacked?"
-  requires:
-    - live
-    - sudo
-  see_also: [Processes, FirewallConfiguration]

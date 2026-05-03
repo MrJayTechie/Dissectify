@@ -24,15 +24,3 @@ sources:
     SELECT "systemextensionsctl list" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="SystemExtensions.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Kernel-level code
-  description: |
-    Live view of loaded kernel extensions and System Extensions (kextstat + systemextensionsctl).
-  questions:
-    - "What kernel-level code is loaded right now?"
-    - "Is there an unauthorized ES client?"
-  requires:
-    - live
-  see_also: [KernelExtensions, Autostart]

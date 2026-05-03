@@ -51,14 +51,3 @@ sources:
     SELECT "groups" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="Groups.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: Login sessions live
-  description: "Who is logged in right now (who, w), plus recent login history (last)."
-  questions:
-    - "Who is logged in at this instant?"
-    - "Were there recent SSH logins?"
-  requires:
-    - live
-  see_also: [utmpx, Users]

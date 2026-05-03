@@ -24,14 +24,3 @@ sources:
     SELECT "ioreg -p IOUSB -w 0" AS Command, run[0].ReturnCode AS ExitCode,
            file_info(filename=out).Size AS StdoutBytes, run[0].Stderr AS Stderr,
            upload(file=out, name="IoregUSB.raw.txt") AS RawUpload FROM scope()
-
-guide:
-  category: Volatile / Runtime
-  subcategory: USB devices live
-  description: |
-    Live USB device tree (system_profiler SPUSBDataType -json and ioreg) — what's attached right now.
-  questions:
-    - "What USB devices are connected right now?"
-    - "Is there an unexpected mass-storage device?"
-  requires:
-    - live
