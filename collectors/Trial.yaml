@@ -1,0 +1,19 @@
+name: MacOS.Collection.Trial
+description: |
+  Apple Trial experimentation framework — which A/B experiments this
+  device is enrolled in (treatment paths, namespaces, rollout history).
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: TrialGlob
+  default: /Users/*/Library/Trial/v*/Database/triald.db,/Users/*/Library/Trial/v*/Database/triald.db-wal,/Users/*/Library/Trial/v*/Database/triald.db-shm,/private/var/db/Trial/v*/Database/triald.db,/private/var/db/Trial/v*/Database/triald.db-wal,/private/var/db/Trial/v*/Database/triald.db-shm
+
+sources:
+- name: Trial files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=TrialGlob, sep=","))

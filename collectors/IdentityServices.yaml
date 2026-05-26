@@ -1,0 +1,19 @@
+name: MacOS.Collection.IdentityServices
+description: |
+  Apple ID identity services — iMessage / FaceTime identity queries
+  and the Apple-ID device registry (Tetra).
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: IdentityServicesGlob
+  default: /Users/*/Library/IdentityServices/ids-query.db,/Users/*/Library/IdentityServices/ids-query.db-wal,/Users/*/Library/IdentityServices/ids-query.db-shm,/Users/*/Library/IdentityServices/TetraDB-identityservicesd.db,/Users/*/Library/IdentityServices/TetraDB-identityservicesd.db-wal,/Users/*/Library/IdentityServices/TetraDB-identityservicesd.db-shm
+
+sources:
+- name: IdentityServices files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=IdentityServicesGlob, sep=","))

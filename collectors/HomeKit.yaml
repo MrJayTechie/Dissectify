@@ -1,0 +1,19 @@
+name: MacOS.Collection.HomeKit
+description: |
+  HomeKit on-device graph: paired accessories, rooms, services,
+  characteristic values, action sets (automations), and triggers.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: HomeKitGlob
+  default: /Users/*/Library/HomeKit/core.sqlite,/Users/*/Library/HomeKit/core.sqlite-wal,/Users/*/Library/HomeKit/core.sqlite-shm,/Users/*/Library/HomeKit/core-local.sqlite,/Users/*/Library/HomeKit/core-local.sqlite-wal,/Users/*/Library/HomeKit/core-local.sqlite-shm,/Users/*/Library/HomeKit/core-cloudkit.sqlite,/Users/*/Library/HomeKit/core-cloudkit.sqlite-wal,/Users/*/Library/HomeKit/core-cloudkit.sqlite-shm,/Users/*/Library/HomeKit/core-cloudkit-shared.sqlite,/Users/*/Library/HomeKit/core-cloudkit-shared.sqlite-wal,/Users/*/Library/HomeKit/core-cloudkit-shared.sqlite-shm
+
+sources:
+- name: HomeKit files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=HomeKitGlob, sep=","))

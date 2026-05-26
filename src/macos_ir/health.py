@@ -1,18 +1,26 @@
-"""Collection health engine — validates a Velociraptor macOS collection.
+#!/usr/bin/env python3
+"""Collection Health Report — validates a Velociraptor macOS collection.
+
+Author: Ali Jammal
 
 Checks artifact presence, SQLite WAL completeness, FDA/SIP inference,
 and provides actionable recommendations.
+
+Usage:
+    python3 collection_health.py /path/to/extracted/collection
+    python3 collection_health.py /path/to/extracted/collection -j
+    python3 collection_health.py /path/to/extracted/collection -v
 """
 
-from __future__ import annotations
-
+import argparse
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Artifact registry: 70 YAML collectors -> expected paths in uploads/auto/
+# Artifact registry: 70 YAML collectors → expected paths in uploads/auto/
 # ──────────────────────────────────────────────────────────────────────────────
 
 ARTIFACT_REGISTRY = {
@@ -540,10 +548,78 @@ ARTIFACT_REGISTRY = {
         "paths": ["Users/*/Library/Application Support/MobileSync/Backup"],
         "check": "dir",
     },
+    # ── New collectors (paired with the 2026 Dissect plugin set) ──
+    "Photos": {
+        "category": "User Activity",
+        "privilege": "FDA",
+        "paths": [
+            "Users/*/Pictures/Photos Library.photoslibrary/database/Photos.sqlite",
+        ],
+        "check": "per_user",
+    },
+    "AuthDB": {
+        "category": "System",
+        "privilege": "ROOT",
+        "paths": ["private/var/db/auth.db"],
+        "check": "exact",
+    },
+    "HomeKit": {
+        "category": "Device State",
+        "privilege": "USER",
+        "paths": ["Users/*/Library/HomeKit/core.sqlite"],
+        "check": "per_user",
+    },
+    "LinkPresentation": {
+        "category": "User Activity",
+        "privilege": "USER",
+        "paths": [
+            "Users/*/Library/Daemon Containers/*/Data/database/linkd.metadatastore.sqlite3",
+        ],
+        "check": "any",
+    },
+    "BLEDevices": {
+        "category": "Network",
+        "privilege": "ROOT",
+        "paths": ["Library/Bluetooth/com.apple.MobileBluetooth.ledevices.other.db"],
+        "check": "exact",
+    },
+    "Shortcuts": {
+        "category": "User Activity",
+        "privilege": "USER",
+        "paths": ["Users/*/Library/Shortcuts/ToolKit"],
+        "check": "dir_any",
+    },
+    "Trial": {
+        "category": "System",
+        "privilege": "USER",
+        "paths": ["Users/*/Library/Trial"],
+        "check": "dir_any",
+    },
+    "IdentityServices": {
+        "category": "Communications",
+        "privilege": "USER",
+        "paths": ["Users/*/Library/IdentityServices/ids-query.db"],
+        "check": "per_user",
+    },
+    "StatusKit": {
+        "category": "User Activity",
+        "privilege": "USER",
+        "paths": ["Users/*/Library/StatusKit/database/statuskit-cloud.db"],
+        "check": "per_user",
+    },
+    "AppleMediaServices": {
+        "category": "User Activity",
+        "privilege": "USER",
+        "paths": [
+            "Users/*/Library/AppleMediaServices/Engagement/journeys/database/app.db",
+            "Users/*/Library/AppleMediaServices/Engagement/analytics/database/app.db",
+        ],
+        "check": "any",
+    },
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SQLite WAL check
+# SQLite WAL check: artifacts where we expect db + wal + shm
 # ──────────────────────────────────────────────────────────────────────────────
 
 SQLITE_WAL_ARTIFACTS = {
@@ -565,7 +641,7 @@ SQLITE_WAL_ARTIFACTS = {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FDA / SIP indicators
+# FDA indicators: if these are present, FDA was likely granted
 # ──────────────────────────────────────────────────────────────────────────────
 
 FDA_INDICATORS = [
@@ -584,111 +660,50 @@ FDA_INDICATORS = [
 SIP_BLOCKED = ["xpdb"]
 SIP_PARTIAL = {"KeyChain": "private/var/db/SystemKey"}
 
-MISSING_REASONS = {
-    "ChromiumBrowsers": "No Chromium-based browser installed",
-    "FirefoxFiles": "Firefox not installed",
-    "SafariFiles": "FDA not granted, or Safari data wiped",
-    "cookies": "FDA not granted, or no cookies stored",
-    "iMessage": "iMessage not configured, or FDA not granted",
-    "CallHistory": "No phone/FaceTime calls, or FDA not granted",
-    "FaceTime": "FaceTime not used, or FDA not granted",
-    "AddressBook": "No contacts, or FDA not granted",
-    "AppleMail": "Mail.app not used, or FDA not granted",
-    "Notifications": "FDA not granted",
-    "AppleNotes": "No Apple Notes, or FDA not granted",
-    "notes": "No Apple Notes (older path), or FDA not granted",
-    "KnowledgeC": "FDA not granted (key indicator)",
-    "Interactions": "FDA not granted (key indicator)",
-    "Biomes": "FDA not granted (key indicator)",
-    "WifiIntelligence": "No WiFi intelligence data, or FDA not granted",
-    "Powerlogs": "FDA not granted",
-    "ScreenTime": "ScreenTime disabled",
-    "Reminders": "No Reminders data, or FDA not granted",
-    "Calendars": "No calendar data",
-    "FindMy": "FindMy data not cached",
-    "SpotlightShortCuts": "No Spotlight shortcut data",
-    "Autostart": "Should always be present — possible collection error",
-    "KernelExtensions": "Should always be present — possible collection error",
-    "Applications": "Should always be present — possible collection error",
-    "LaunchPad": "FDA not granted",
-    "TCC": "FDA not granted (key indicator)",
-    "FirewallConfiguration": "Firewall config not found",
-    "KeyChain": "FDA not granted, or keychain files missing",
-    "ManagedDeviceProfile": "No MDM profiles (not enterprise-managed)",
-    "xpdb": "SIP-blocked (expected on live system)",
-    "Sudoers": "Should always be present — possible collection error",
-    "sudolastrun": "sudo never used",
-    "OSName": "Should always be present — possible collection error",
-    "OSInstallationDate": ".AppleSetupDone not found",
-    "Users": "Should always be present — possible collection error",
-    "localtime": "Should always be present — possible collection error",
-    "hosts": "Should always be present — possible collection error",
-    "etcFolder": "Should always be present — possible collection error",
-    "SharedFolder": "No SMB/AFP share points configured",
-    "DHCPLease": "No DHCP leases",
-    "InternetAccounts": "No internet accounts configured",
-    "LibraryPreferences": "Should always be present — possible collection error",
-    "AlternateLog": "Should always be present — possible collection error",
-    "CrashReporter": "No crash reports",
-    "PrintJobs": "No print job history",
-    "DSStore": "No .DS_Store files found",
-    "FsEvents": "No FSEvents data",
-    "DocumentRevisions": "Versions database empty or purged",
-    "Trash": "Trash is empty",
-    "QuickLook": "QuickLook cache empty or purged",
-    "ApplePayWallet": "Apple Pay not configured, or FDA not granted",
-    "InstallHistory": "Should always be present — possible collection error",
-    "SoftwareInstallationUpdates": "Should always be present — possible collection error",
-    "MicrosoftOfficeMRU": "Microsoft Office not installed",
-    "Applist": "Spotlight applist not found",
-    "SSHHost": "No SSH connections made",
-    "ard": "Apple Remote Desktop never enabled",
-    "msrdc": "Microsoft Remote Desktop not installed",
-    "ScreenSharing": "Screen Sharing never used",
-    "FavoriteVolumes": "No Finder sidebar favorites",
-    "lockdown": "No iOS device ever paired",
-    "ShellHistoryAndSessions": "No shell history",
-    "utmpx": "No login records",
-    "SavedState": "No saved application state",
-    "TerminalState": "Terminal no longer saves state on macOS 15",
-    "KeyboardDictionary": "No custom dictionary words",
-    "iCloud": "No iCloud data, or FDA not granted",
-    "iCloudLocalStorage": "No iCloud Drive local files",
-    "iDeviceBackup": "No local iPhone/iPad backups",
-}
+# ──────────────────────────────────────────────────────────────────────────────
+# ANSI colors
+# ──────────────────────────────────────────────────────────────────────────────
+
+class C:
+    """ANSI color codes."""
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    RED = "\033[31m"
+    CYAN = "\033[36m"
+    WHITE = "\033[97m"
+
+    @classmethod
+    def disable(cls):
+        for attr in ["RESET", "BOLD", "DIM", "GREEN", "YELLOW", "RED", "CYAN", "WHITE"]:
+            setattr(cls, attr, "")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Engine
+# Main engine
 # ──────────────────────────────────────────────────────────────────────────────
 
 class CollectionHealth:
-    """Validate a Velociraptor macOS collection directory."""
-
-    def __init__(self, collection_dir: str | Path):
+    def __init__(self, collection_dir):
         self.collection_dir = Path(collection_dir)
-        self.uploads_auto = self._find_uploads_auto()
-        self.users: list[str] = []
-        self.metadata: dict = {}
+        self.uploads_auto = self.collection_dir / "uploads" / "auto"
+        if not self.uploads_auto.is_dir():
+            # Maybe they pointed directly at uploads/auto
+            if self.collection_dir.name == "auto" and (self.collection_dir / "Users").is_dir():
+                self.uploads_auto = self.collection_dir
+                self.collection_dir = self.collection_dir.parent.parent
+            elif (self.collection_dir / "auto").is_dir():
+                self.uploads_auto = self.collection_dir / "auto"
+                self.collection_dir = self.collection_dir.parent
+            else:
+                print(f"Error: Cannot find uploads/auto/ under {collection_dir}", file=sys.stderr)
+                sys.exit(1)
+        self.users = []
+        self.metadata = {}
 
-    def _find_uploads_auto(self) -> Path:
-        p = self.collection_dir
-        # Velociraptor layout: <root>/uploads/auto/
-        if (p / "uploads" / "auto").is_dir():
-            return p / "uploads" / "auto"
-        # Shell-script collector layout: <root>/filesystem/
-        if (p / "filesystem").is_dir():
-            return p / "filesystem"
-        # Caller pointed directly at the inner root
-        if p.name in ("auto", "filesystem") and (p / "Users").is_dir():
-            self.collection_dir = p.parent.parent if p.name == "auto" else p.parent
-            return p
-        if (p / "auto").is_dir():
-            self.collection_dir = p.parent
-            return p / "auto"
-        raise FileNotFoundError(f"Cannot find uploads/auto/ or filesystem/ under {p}")
-
-    def discover_users(self) -> list[str]:
+    def discover_users(self):
         users_dir = self.uploads_auto / "Users"
         if not users_dir.is_dir():
             return []
@@ -698,7 +713,7 @@ class CollectionHealth:
         ])
         return self.users
 
-    def load_metadata(self) -> dict:
+    def load_metadata(self):
         result = {
             "hostname": "UNKNOWN",
             "os_version": "",
@@ -722,10 +737,7 @@ class CollectionHealth:
                 result["kernel"] = ci.get("KernelVersion", ci.get("kernel_version", ""))
                 os_info = ci.get("os_info", {})
                 if os_info:
-                    result["os_version"] = (
-                        f"{os_info.get('system', '')} {os_info.get('release', '')} "
-                        f"({os_info.get('machine', '')})"
-                    )
+                    result["os_version"] = f"{os_info.get('system', '')} {os_info.get('release', '')} ({os_info.get('machine', '')})"
             except Exception:
                 pass
 
@@ -737,6 +749,7 @@ class CollectionHealth:
                 ts = cc.get("create_time", 0)
                 if ts:
                     try:
+                        # Velociraptor uses nanoseconds since epoch
                         if ts > 1e18:
                             ts_sec = ts / 1e9
                         elif ts > 1e15:
@@ -757,43 +770,42 @@ class CollectionHealth:
             except Exception:
                 pass
 
+        # Try to get OS version from SystemVersion.plist
         sv_path = self.uploads_auto / "System" / "Library" / "CoreServices" / "SystemVersion.plist"
         if sv_path.exists():
             try:
                 import plistlib
                 with open(sv_path, "rb") as f:
                     sv = plistlib.load(f)
-                result["os_version"] = (
-                    f"{sv.get('ProductName', 'macOS')} "
-                    f"{sv.get('ProductUserVisibleVersion', '')} "
-                    f"({sv.get('ProductBuildVersion', '')})"
-                )
+                result["os_version"] = f"{sv.get('ProductName', 'macOS')} {sv.get('ProductUserVisibleVersion', '')} ({sv.get('ProductBuildVersion', '')})"
             except Exception:
                 pass
 
         self.metadata = result
         return result
 
-    # ── Path helpers ──
-
-    def _resolve_paths(self, pattern: str) -> list[Path]:
-        if "Users/*" in pattern:
+    def _resolve_paths(self, pattern):
+        """Resolve a path pattern against uploads/auto, handling Users/* substitution."""
+        if "Users/*" in pattern or "Users/*/" in pattern:
             results = []
             for user in self.users:
                 resolved = pattern.replace("Users/*", f"Users/{user}", 1)
-                results.append(self.uploads_auto / resolved)
+                full = self.uploads_auto / resolved
+                results.append(full)
             return results
-        if "*" in pattern:
+        elif "*" in pattern:
+            # Use glob for other wildcards
             try:
                 return list(self.uploads_auto.glob(pattern))[:20]
             except Exception:
                 return []
-        return [self.uploads_auto / pattern]
+        else:
+            return [self.uploads_auto / pattern]
 
-    def _path_exists(self, p: Path) -> bool:
+    def _path_exists(self, p):
         return p.exists() or p.is_symlink()
 
-    def _dir_has_files(self, d: Path) -> bool:
+    def _dir_has_files(self, d):
         if not d.is_dir():
             return False
         try:
@@ -801,9 +813,7 @@ class CollectionHealth:
         except PermissionError:
             return False
 
-    # ── Checks ──
-
-    def check_artifact_presence(self) -> dict:
+    def check_artifact_presence(self):
         results = {}
         for name, spec in ARTIFACT_REGISTRY.items():
             check = spec.get("check", "any")
@@ -811,21 +821,24 @@ class CollectionHealth:
             found_count = 0
             checked = 0
 
-            if check in ("exact", "per_user", "any", "any_mixed", "dir_any"):
+            if check == "exact":
                 for p in paths:
                     resolved = self._resolve_paths(p)
                     for rp in resolved:
                         checked += 1
-                        if check == "dir" and self._dir_has_files(rp):
-                            found_count += 1
-                        elif check in ("dir_any", "any_mixed"):
-                            if self._path_exists(rp) or self._dir_has_files(rp):
-                                found_count += 1
-                        elif self._path_exists(rp):
+                        if self._path_exists(rp):
                             found_count += 1
 
             elif check == "exact_or_alt":
                 for p in paths + spec.get("alt_paths", []):
+                    resolved = self._resolve_paths(p)
+                    for rp in resolved:
+                        checked += 1
+                        if self._path_exists(rp):
+                            found_count += 1
+
+            elif check == "per_user":
+                for p in paths:
                     resolved = self._resolve_paths(p)
                     for rp in resolved:
                         checked += 1
@@ -840,16 +853,35 @@ class CollectionHealth:
                         if self._dir_has_files(rp):
                             found_count += 1
 
+            elif check in ("dir_any", "any_mixed"):
+                for p in paths:
+                    resolved = self._resolve_paths(p)
+                    for rp in resolved:
+                        checked += 1
+                        if self._path_exists(rp) or self._dir_has_files(rp):
+                            found_count += 1
+
+            elif check == "any":
+                for p in paths:
+                    resolved = self._resolve_paths(p)
+                    for rp in resolved:
+                        checked += 1
+                        if self._path_exists(rp):
+                            found_count += 1
+
             elif check in ("screentime", "launchpad", "quicklook", "dsstore"):
+                # Special checks for paths with deep wildcards
                 checked = 1
                 base = self.uploads_auto / paths[0]
                 if check == "dsstore":
+                    # Check if any .DS_Store or %2EDS_Store exists under Users/
                     base = self.uploads_auto / "Users"
                     if base.is_dir():
-                        for _ in base.rglob("*DS_Store"):
+                        for ds in base.rglob("*DS_Store"):
                             found_count = 1
                             break
                 elif base.is_dir():
+                    # Walk looking for the target
                     targets = {
                         "screentime": "com.apple.ScreenTimeAgent",
                         "launchpad": "com.apple.dock.launchpad",
@@ -861,14 +893,20 @@ class CollectionHealth:
                             if target in root:
                                 found_count = 1
                                 break
+                            # Don't walk too deep
                             depth = root.replace(str(base), "").count(os.sep)
                             if depth > 5:
                                 dirs.clear()
                     except Exception:
                         pass
 
+            if found_count > 0:
+                status = "PRESENT"
+            else:
+                status = "MISSING"
+
             results[name] = {
-                "status": "PRESENT" if found_count > 0 else "MISSING",
+                "status": status,
                 "found": found_count,
                 "checked": checked,
                 "category": spec["category"],
@@ -877,23 +915,25 @@ class CollectionHealth:
 
         return results
 
-    def check_wal_completeness(self) -> dict:
+    def check_wal_completeness(self):
         results = {}
         for label, db_pattern in SQLITE_WAL_ARTIFACTS.items():
             resolved = self._resolve_paths(db_pattern)
-            wal_resolved = self._resolve_paths(db_pattern + "-wal")
-            shm_resolved = self._resolve_paths(db_pattern + "-shm")
+            wal_pattern = db_pattern + "-wal"
+            shm_pattern = db_pattern + "-shm"
+            wal_resolved = self._resolve_paths(wal_pattern)
+            shm_resolved = self._resolve_paths(shm_pattern)
 
             for i, db_path in enumerate(resolved):
                 wal_path = wal_resolved[i] if i < len(wal_resolved) else None
                 shm_path = shm_resolved[i] if i < len(shm_resolved) else None
 
                 db_exists = self._path_exists(db_path) if db_path else False
-                if not db_exists:
-                    continue
-
                 wal_exists = self._path_exists(wal_path) if wal_path else False
                 shm_exists = self._path_exists(shm_path) if shm_path else False
+
+                if not db_exists:
+                    continue  # Skip non-existent databases
 
                 entry_label = label
                 if "Users/*" in db_pattern and self.users:
@@ -910,9 +950,12 @@ class CollectionHealth:
                 else:
                     status = "DB_ONLY"
 
-                wal_size = db_size = 0
+                # Check WAL size — if WAL is 0 bytes that's also noteworthy
+                wal_size = 0
+                db_size = 0
                 try:
-                    db_size = db_path.stat().st_size
+                    if db_exists:
+                        db_size = db_path.stat().st_size
                     if wal_exists:
                         wal_size = wal_path.stat().st_size
                 except Exception:
@@ -929,8 +972,9 @@ class CollectionHealth:
 
         return results
 
-    def infer_fda_status(self, artifact_results: dict) -> dict:
-        present = missing = 0
+    def infer_fda_status(self, artifact_results):
+        present = 0
+        missing = 0
         indicators = {}
         for name in FDA_INDICATORS:
             is_present = artifact_results.get(name, {}).get("status") == "PRESENT"
@@ -961,55 +1005,74 @@ class CollectionHealth:
             "indicators": indicators,
         }
 
-    def generate_recommendations(self, artifact_results: dict, wal_results: dict, fda: dict) -> list[dict]:
+    def check_sip_blocked(self):
+        results = {}
+        for name in SIP_BLOCKED:
+            spec = ARTIFACT_REGISTRY.get(name, {})
+            for p in spec.get("paths", []):
+                resolved = self._resolve_paths(p)
+                for rp in resolved:
+                    exists = self._path_exists(rp) or self._dir_has_files(rp)
+                    results[name] = "PRESENT" if exists else "MISSING (expected on live)"
+
+        # SystemKey specifically
+        sk = self.uploads_auto / "private" / "var" / "db" / "SystemKey"
+        results["KeyChain (SystemKey)"] = "PRESENT" if sk.exists() else "MISSING (expected on live)"
+        return results
+
+    def generate_recommendations(self, artifact_results, wal_results, fda):
         recs = []
         present = sum(1 for v in artifact_results.values() if v["status"] == "PRESENT")
+        missing = sum(1 for v in artifact_results.values() if v["status"] == "MISSING")
         total = len(artifact_results)
 
+        # FDA recommendation
         if fda["status"] in ("NOT_GRANTED", "LIKELY_NOT_GRANTED"):
             recs.append({
                 "level": "CRITICAL",
-                "message": (
-                    f"FDA likely NOT granted ({fda['missing']}/{fda['total']} protected artifacts missing). "
-                    "Re-collect with FDA granted."
-                ),
+                "message": f"FDA likely NOT granted — {fda['missing']}/{fda['total']} protected artifacts missing. "
+                           "Re-collect with FDA granted to the collector binary.",
             })
         elif fda["status"] in ("GRANTED", "LIKELY_GRANTED"):
             recs.append({
                 "level": "OK",
-                "message": f"FDA was granted ({fda['present']}/{fda['total']} protected artifacts present).",
+                "message": f"FDA was granted — {fda['present']}/{fda['total']} protected artifacts present.",
             })
 
+        # Overall completeness
         if present >= 55:
             recs.append({"level": "OK", "message": f"Collection looks complete ({present}/{total} artifacts present)."})
         elif present >= 40:
-            recs.append({"level": "WARN", "message": f"Collection partially complete ({present}/{total}). Check missing artifacts."})
+            recs.append({"level": "WARN", "message": f"Collection partially complete ({present}/{total} artifacts present). Check missing artifacts."})
         else:
-            recs.append({"level": "CRITICAL", "message": f"Collection may be incomplete ({present}/{total}). Verify collector ran correctly."})
+            recs.append({"level": "CRITICAL", "message": f"Collection may be incomplete ({present}/{total} artifacts present). Verify collector ran correctly."})
 
-        wal_missing_names = [k for k, v in wal_results.items() if v["status"] == "WAL_MISSING"]
-        wal_missing_real = [n for n in wal_missing_names if "TCC" not in n]
-        wal_missing_tcc = [n for n in wal_missing_names if "TCC" in n]
-        if wal_missing_real:
+        # WAL warnings
+        wal_missing = sum(1 for v in wal_results.values() if v["status"] == "WAL_MISSING")
+        if wal_missing > 0:
             recs.append({
                 "level": "WARN",
-                "message": f"{len(wal_missing_real)} database(s) missing WAL: {', '.join(wal_missing_real)}",
+                "message": f"{wal_missing} SQLite database(s) missing WAL files — recent uncommitted writes may be truncated.",
             })
-        if wal_missing_tcc:
+
+        # SIP note
+        sip_missing = sum(1 for v in artifact_results.values()
+                         if v["privilege"] == "SIP" and v["status"] == "MISSING")
+        if sip_missing > 0:
             recs.append({
                 "level": "INFO",
-                "message": "TCC database(s) missing WAL (normal, macOS checkpoints immediately).",
+                "message": f"{sip_missing} SIP-blocked artifact(s) missing — expected on live SIP-enabled systems.",
             })
 
         return recs
 
-    def run(self) -> dict:
-        """Run all checks and return a structured result dict."""
+    def run(self):
         self.discover_users()
         self.load_metadata()
         artifact_results = self.check_artifact_presence()
         wal_results = self.check_wal_completeness()
         fda = self.infer_fda_status(artifact_results)
+        sip = self.check_sip_blocked()
         recs = self.generate_recommendations(artifact_results, wal_results, fda)
 
         return {
@@ -1018,6 +1081,7 @@ class CollectionHealth:
             "artifacts": artifact_results,
             "wal_completeness": wal_results,
             "fda_inference": fda,
+            "sip_blocked": sip,
             "recommendations": recs,
             "summary": {
                 "total_artifacts": len(artifact_results),
@@ -1028,3 +1092,173 @@ class CollectionHealth:
                 "fda_status": fda["status"],
             },
         }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Terminal output
+# ──────────────────────────────────────────────────────────────────────────────
+
+def format_terminal(result, verbose=False):
+    meta = result["metadata"]
+    summary = result["summary"]
+    artifacts = result["artifacts"]
+    wal = result["wal_completeness"]
+    fda = result["fda_inference"]
+    sip = result["sip_blocked"]
+    recs = result["recommendations"]
+
+    line = "=" * 72
+    print(f"\n{C.BOLD}{C.WHITE}{line}{C.RESET}")
+    print(f"{C.BOLD}{C.WHITE}  COLLECTION HEALTH REPORT{C.RESET}")
+    print(f"{C.DIM}  Author: Ali Jammal{C.RESET}")
+    print(f"{C.BOLD}{C.WHITE}{line}{C.RESET}")
+
+    # Metadata
+    print(f"\n{C.BOLD}COLLECTION METADATA{C.RESET}")
+    print(f"  Hostname:        {C.CYAN}{meta['hostname']}{C.RESET}")
+    print(f"  OS Version:      {meta['os_version']}")
+    print(f"  Collection Date: {meta['collection_date']}")
+    if meta["duration_seconds"]:
+        mins = int(meta["duration_seconds"]) // 60
+        secs = int(meta["duration_seconds"]) % 60
+        print(f"  Duration:        {mins}m {secs}s")
+    print(f"  Total Files:     {meta['total_files']:,}")
+    if meta["total_bytes"]:
+        gb = meta["total_bytes"] / (1024 ** 3)
+        print(f"  Total Size:      {gb:.1f} GB")
+    print(f"  Users Found:     {', '.join(result['users']) or 'none'}")
+
+    # Artifact presence
+    print(f"\n{C.BOLD}{C.WHITE}{line}{C.RESET}")
+    print(f"{C.BOLD}ARTIFACT PRESENCE ({summary['total_artifacts']} artifacts){C.RESET}")
+    print(f"{C.BOLD}{C.WHITE}{line}{C.RESET}")
+    print(f"\n  {C.GREEN}PRESENT: {summary['present']}{C.RESET}   "
+          f"{C.RED}MISSING: {summary['missing']}{C.RESET}")
+
+    # Group by category
+    categories = {}
+    for name, info in artifacts.items():
+        cat = info["category"]
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append((name, info))
+
+    for cat in sorted(categories.keys()):
+        print(f"\n  {C.BOLD}{C.DIM}── {cat} ──{C.RESET}")
+        for name, info in sorted(categories[cat], key=lambda x: (x[1]["status"] != "PRESENT", x[0])):
+            if info["status"] == "PRESENT":
+                icon = f"{C.GREEN}PRESENT{C.RESET}"
+            else:
+                icon = f"{C.RED}MISSING{C.RESET}"
+            priv = f"{C.DIM}[{info['privilege']}]{C.RESET}"
+            print(f"    [{icon}]  {name:<30} {priv}")
+
+    # WAL completeness
+    if wal:
+        print(f"\n{C.BOLD}{C.WHITE}{line}{C.RESET}")
+        print(f"{C.BOLD}SQLITE WAL COMPLETENESS ({len(wal)} databases found){C.RESET}")
+        print(f"{C.BOLD}{C.WHITE}{line}{C.RESET}")
+
+        complete = sum(1 for v in wal.values() if v["status"] == "COMPLETE")
+        wal_miss = sum(1 for v in wal.values() if v["status"] == "WAL_MISSING")
+        print(f"\n  {C.GREEN}COMPLETE: {complete}{C.RESET}   "
+              f"{C.YELLOW}WAL_MISSING: {wal_miss}{C.RESET}")
+
+        for label, info in sorted(wal.items()):
+            if info["status"] == "COMPLETE":
+                icon = f"{C.GREEN}COMPLETE{C.RESET}"
+            elif info["status"] == "WAL_MISSING":
+                icon = f"{C.YELLOW}WAL_MISSING{C.RESET}"
+            else:
+                icon = f"{C.DIM}{info['status']}{C.RESET}"
+
+            size_info = ""
+            if verbose:
+                db_kb = info["db_size"] // 1024
+                wal_kb = info["wal_size"] // 1024
+                size_info = f" (db: {db_kb}KB, wal: {wal_kb}KB)"
+
+            print(f"    [{icon}]  {label}{size_info}")
+
+    # FDA inference
+    print(f"\n{C.BOLD}{C.WHITE}{line}{C.RESET}")
+    print(f"{C.BOLD}FULL DISK ACCESS INFERENCE{C.RESET}")
+    print(f"{C.BOLD}{C.WHITE}{line}{C.RESET}")
+
+    if fda["status"] in ("GRANTED", "LIKELY_GRANTED"):
+        status_color = C.GREEN
+    elif fda["status"] in ("NOT_GRANTED", "LIKELY_NOT_GRANTED"):
+        status_color = C.RED
+    else:
+        status_color = C.YELLOW
+
+    print(f"\n  FDA Status:  {status_color}{C.BOLD}{fda['status']}{C.RESET} ({fda['confidence']} confidence)")
+    print(f"  Protected artifacts present: {fda['present']}/{fda['total']}")
+    print()
+    for name, present in fda["indicators"].items():
+        if present:
+            print(f"    {C.GREEN}[YES]{C.RESET}  {name}")
+        else:
+            print(f"    {C.RED}[ NO]{C.RESET}  {name}")
+
+    # SIP
+    print(f"\n{C.BOLD}{C.WHITE}{line}{C.RESET}")
+    print(f"{C.BOLD}SIP-BLOCKED ARTIFACTS{C.RESET}")
+    print(f"{C.BOLD}{C.WHITE}{line}{C.RESET}")
+    for name, status in sip.items():
+        print(f"\n    {name}: {C.DIM}{status}{C.RESET}")
+
+    # Recommendations
+    print(f"\n{C.BOLD}{C.WHITE}{line}{C.RESET}")
+    print(f"{C.BOLD}RECOMMENDATIONS{C.RESET}")
+    print(f"{C.BOLD}{C.WHITE}{line}{C.RESET}\n")
+    for rec in recs:
+        level = rec["level"]
+        if level == "OK":
+            icon = f"{C.GREEN}[OK]{C.RESET}"
+        elif level == "WARN":
+            icon = f"{C.YELLOW}[WARN]{C.RESET}"
+        elif level == "CRITICAL":
+            icon = f"{C.RED}[CRITICAL]{C.RESET}"
+        else:
+            icon = f"{C.CYAN}[INFO]{C.RESET}"
+        print(f"  {icon}  {rec['message']}")
+
+    print()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI
+# ──────────────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="MacOS Velociraptor Collection Health Report",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  python3 collection_health.py ~/dissect-collections/2026-04-12/
+  python3 collection_health.py ~/dissect-collections/2026-04-12/ -j
+  python3 collection_health.py ~/dissect-collections/2026-04-12/ -v
+  python3 collection_health.py ~/dissect-collections/2026-04-12/uploads/auto
+""",
+    )
+    parser.add_argument("collection_dir", help="Path to extracted collection (parent of uploads/auto/)")
+    parser.add_argument("-j", "--json", action="store_true", help="Output as JSON")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show file sizes and details")
+    parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
+    args = parser.parse_args()
+
+    if args.no_color or not sys.stdout.isatty():
+        C.disable()
+
+    health = CollectionHealth(args.collection_dir)
+    result = health.run()
+
+    if args.json:
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        format_terminal(result, verbose=args.verbose)
+
+
+if __name__ == "__main__":
+    main()

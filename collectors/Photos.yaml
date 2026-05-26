@@ -1,0 +1,19 @@
+name: MacOS.Collection.Photos
+description: |
+  Collect Photos library SQLite DBs + supporting analytics caches. Carries
+  asset metadata + EXIF + GPS + person clusters.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: PhotosGlob
+  default: /Users/*/Pictures/Photos Library.photoslibrary/database/Photos.sqlite,/Users/*/Pictures/Photos Library.photoslibrary/database/Photos.sqlite-wal,/Users/*/Pictures/Photos Library.photoslibrary/database/Photos.sqlite-shm,/Users/*/Pictures/Photos Library.photoslibrary/database/search/psi.sqlite,/Users/*/Library/Photos/Libraries/Syndication.photoslibrary/database/Photos.sqlite,/Users/*/Library/Photos/Libraries/Syndication.photoslibrary/database/Photos.sqlite-wal,/Users/*/Library/Photos/Libraries/Syndication.photoslibrary/database/Photos.sqlite-shm
+
+sources:
+- name: Photos files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=PhotosGlob, sep=","))

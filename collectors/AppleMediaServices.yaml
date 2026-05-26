@@ -1,0 +1,19 @@
+name: MacOS.Collection.AppleMediaServices
+description: |
+  AppleMediaServices engagement caches — App Store / Apple Music /
+  Books / TV / News browsing journeys + analytics.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: AppleMediaServicesGlob
+  default: /Users/*/Library/AppleMediaServices/Engagement/*/database/app.db,/Users/*/Library/AppleMediaServices/Engagement/*/database/app.db-wal,/Users/*/Library/AppleMediaServices/Engagement/*/database/app.db-shm
+
+sources:
+- name: AppleMediaServices files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=AppleMediaServicesGlob, sep=","))

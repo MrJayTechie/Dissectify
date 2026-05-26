@@ -1,0 +1,18 @@
+name: MacOS.Collection.StatusKit
+description: |
+  Focus statuses published and received via StatusKit / CloudKit.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: StatusKitGlob
+  default: /Users/*/Library/StatusKit/database/statuskit-cloud.db,/Users/*/Library/StatusKit/database/statuskit-cloud.db-wal,/Users/*/Library/StatusKit/database/statuskit-cloud.db-shm
+
+sources:
+- name: StatusKit files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=StatusKitGlob, sep=","))

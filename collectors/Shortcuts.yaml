@@ -1,0 +1,19 @@
+name: MacOS.Collection.Shortcuts
+description: |
+  Apple Shortcuts ToolKit catalog — every Shortcut / App Intent the
+  device knows how to run (Apple built-ins + third-party contributions).
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: ShortcutsGlob
+  default: /Users/*/Library/Shortcuts/ToolKit/Tools-prod.v*.sqlite,/Users/*/Library/Shortcuts/ToolKit/Tools-prod.v*.sqlite-wal,/Users/*/Library/Shortcuts/ToolKit/Tools-prod.v*.sqlite-shm
+
+sources:
+- name: Shortcuts files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=ShortcutsGlob, sep=","))

@@ -1,0 +1,19 @@
+name: MacOS.Collection.LinkPresentation
+description: |
+  linkd metadata store — every URL the OS generated a rich preview for
+  (Messages / Mail / Notes / Share Sheet shares).
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: LinkPresentationGlob
+  default: /Users/*/Library/Daemon Containers/*/Data/database/linkd.metadatastore.sqlite3,/Users/*/Library/Daemon Containers/*/Data/database/linkd.metadatastore.sqlite3-wal,/Users/*/Library/Daemon Containers/*/Data/database/linkd.metadatastore.sqlite3-shm
+
+sources:
+- name: LinkPresentation files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=LinkPresentationGlob, sep=","))

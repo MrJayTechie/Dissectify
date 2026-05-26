@@ -1,0 +1,19 @@
+name: MacOS.Collection.BLEDevices
+description: |
+  Bluetooth Low Energy devices observed (paired or not) — UUID,
+  advertised + resolved MACs, last-seen and last-connection timestamps.
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: BLEDevicesGlob
+  default: /Library/Bluetooth/com.apple.MobileBluetooth.ledevices.other.db,/Library/Bluetooth/com.apple.MobileBluetooth.devices.plist,/Library/Bluetooth/com.apple.MobileBluetooth.services.plist
+
+sources:
+- name: BLEDevices files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=BLEDevicesGlob, sep=","))

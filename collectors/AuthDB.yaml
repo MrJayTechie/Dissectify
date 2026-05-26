@@ -1,0 +1,19 @@
+name: MacOS.Collection.AuthDB
+description: |
+  System authorization rules database (auth.db) — every named right and
+  its requirement (allow / deny / authenticate-session-owner / mechanisms).
+author: Ali Jammal
+
+precondition: SELECT OS FROM info() WHERE OS =~ 'darwin'
+
+parameters:
+- name: AuthDBGlob
+  default: /private/var/db/auth.db,/private/var/db/auth.db-wal,/private/var/db/auth.db-shm
+
+sources:
+- name: AuthDB files
+  query: |
+    SELECT OSPath, Name, Mtime, Size,
+           hash(path=OSPath) AS SHA256,
+           upload(file=OSPath) AS Upload
+    FROM glob(globs=split(string=AuthDBGlob, sep=","))
