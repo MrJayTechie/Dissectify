@@ -10,6 +10,7 @@ PLUGIN_FUNCTIONS: dict[str, list[str]] = {
         "firefox.history", "firefox.downloads", "firefox.searches", "firefox.bookmarks",
         "firefox.cookies", "firefox.logins", "firefox.formhistory",
         "cookies.entries",
+        "linkd.links",
     ],
     "execution": [
         "knowledgec.app_usage", "knowledgec.web_usage", "knowledgec.media_usage",
@@ -23,10 +24,24 @@ PLUGIN_FUNCTIONS: dict[str, list[str]] = {
         "biome.safari_pageview",
         "biome.siri_execution", "biome.messages_read",
         "biome.carplay", "biome.screen_sharing",
+        # Tahoe / Apple Intelligence streams
+        "biome.apple_intelligence_tasks", "biome.system_settings_search",
+        "biome.ai_model_catalog", "biome.generative_functions",
+        "biome.siri_remembers", "biome.siri_self_events", "biome.siri_metrics",
+        "biome.media_analysis", "biome.llm_cache",
+        "biome.messages_shared", "biome.intelligence_views_updated",
+        "biome.safari_extra",
+        # Biome SQLite databases (separate from SEGB streams)
+        "biome.entities", "biome.entity_changes",
+        "biome.recent_apps", "biome.cloud_sync",
+        # Other on-device activity
         "screentime.usage", "screentime.blocks",
         "spotlightshortcuts.entries", "spotlight.applist",
         "launchpad.apps",
+        "shortcuts.tools",
         "interactions.entries", "interactions.contacts",
+        "ams.content",
+        "trial.experiments",
     ],
     "communication": [
         "imessage.messages", "imessage.chats", "imessage.attachments",
@@ -35,6 +50,8 @@ PLUGIN_FUNCTIONS: dict[str, list[str]] = {
         "addressbook.contacts", "addressbook.emails", "addressbook.phones",
         "notifications.entries",
         "notes.entries", "notes.attachments",
+        "mail.messages", "mail.attachments",
+        "ids.handles",
     ],
     "persistence": [
         "autostart.launch_agents", "autostart.launch_daemons", "autostart.launch_items",
@@ -48,8 +65,12 @@ PLUGIN_FUNCTIONS: dict[str, list[str]] = {
         "tcc.access", "tcc.expired", "tcc.location_clients",
         "firewall.pf_rules", "firewall.alf_config", "firewall.alf_exceptions",
         "firewall.alf_services", "firewall.alf_apps",
+        "sysconfig.firewall",
         "keychain.generic", "keychain.internet", "keychain.certificates",
         "profiles.installed", "profiles.payloads", "profiles.settings",
+        "auth.rules",
+        "quarantine.events",
+        "locationd.clients",
     ],
     "system": [
         "preferences.entries",
@@ -66,6 +87,7 @@ PLUGIN_FUNCTIONS: dict[str, list[str]] = {
         "logs.audit_events",
         "crashreporter.entries", "crashreporter.events",
         "powerlogs.sleep_wake", "powerlogs.app_usage", "powerlogs.network",
+        "timemachine.destinations", "timemachine.config",
     ],
     "filesystem": [
         "fsevents.events",
@@ -81,6 +103,11 @@ PLUGIN_FUNCTIONS: dict[str, list[str]] = {
         "ard.config", "ard.access",
         "msrdc.connections",
         "screensharing.connections",
+        "sysconfig.wifi_known", "sysconfig.network_interfaces",
+        "sysconfig.network_locations",
+        "vpn.configs",
+        "ble.devices_seen",
+        "bluetoothpaired.devices",
     ],
     "auth": [
         "utmpx.entries",
@@ -99,6 +126,7 @@ PLUGIN_FUNCTIONS: dict[str, list[str]] = {
     "accounts": [
         "accounts.entries", "accounts.properties", "accounts.credentials",
         "icloudfiles.files",
+        "icloudaccounts.accounts",
     ],
     "devicestate": [
         "savedstate.entries",
@@ -106,6 +134,15 @@ PLUGIN_FUNCTIONS: dict[str, list[str]] = {
         "sharedfilelist.favorites", "sharedfilelist.volumes",
         "sharedfilelist.recent_apps", "sharedfilelist.recent_docs", "sharedfilelist.projects",
         "idevicebackup.info", "idevicebackup.files",
+        "lockdown.paired",
+        "dock.items",
+        "homekit.accessories", "homekit.homes", "homekit.triggers",
+        "statuskit.channels", "statuskit.statuses",
+    ],
+    "user_data": [
+        "calendar.events", "calendar.calendars", "calendar.alarms",
+        "reminders.entries",
+        "photos.assets", "photos.albums", "photos.persons",
     ],
 }
 

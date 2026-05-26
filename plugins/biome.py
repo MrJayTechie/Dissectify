@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sqlite3
 import struct
+import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
@@ -25,18 +27,22 @@ def _cocoa_ts(value):
 
 
 def _extract_protobuf_strings(data, start, end):
-    """Extract length-delimited strings from a protobuf fragment. Only
-    strings — callers like `app_in_focus` position-index this list by
-    protobuf field number and assume the entries are real text, so mixing
-    in numerics would scramble those columns.
+    """Extract length-delimited strings and typed numerics from a protobuf
+    fragment. Streams that carry only numeric payloads (display brightness,
+    WiFi RSSI, bluetooth link quality) produce no strings under a text-only
+    extractor, which is why biome.display / biome.wifi used to emit rows
+    with nothing but a timestamp. Surfacing varints and floats alongside
+    strings keeps those streams useful without per-stream protobuf schemas.
     """
     strings = []
+    numerics = []
     pos = start
     while pos < end - 2:
         tag = data[pos]
         wire = tag & 0x07
         field_num = tag >> 3
-        if wire == 2 and tag > 0x08:  # length-delimited (strings, sub-messages)
+        # wire type 2 — length-delimited (strings, sub-messages)
+        if wire == 2 and tag > 0x08:
             slen = data[pos + 1]
             if 2 < slen < 200 and pos + 2 + slen <= end:
                 try:
@@ -45,29 +51,16 @@ def _extract_protobuf_strings(data, start, end):
                         strings.append((field_num, s))
                 except UnicodeDecodeError:
                     pass
-        pos += 1
-    return strings
-
-
-def _extract_protobuf_numerics(data, start, end):
-    """Extract varints and fixed32 floats from a protobuf fragment.
-    Separate from the string extractor so callers that specifically need
-    identifier strings (bundle ids, intent names) aren't polluted by
-    numeric payloads. Streams carrying only numeric state (display
-    brightness, WiFi RSSI) opt in to these via the generic parser.
-    """
-    numerics = []
-    pos = start
-    while pos < end - 2:
-        tag = data[pos]
-        wire = tag & 0x07
-        field_num = tag >> 3
-        if wire == 0 and tag > 0x08:  # varint
+        # wire type 0 — varint (booleans, ints, enum codes)
+        elif wire == 0 and tag > 0x08:
             v, new_pos = _read_varint(data, pos + 1, end)
-            if v is not None and new_pos - pos <= 10 and 0 <= v < 1 << 32:
-                numerics.append((field_num, f"i{v}"))
-                pos = new_pos - 1
-        elif wire == 5 and tag > 0x08 and pos + 5 <= end:  # fixed32
+            if v is not None and new_pos - pos <= 10:
+                # Skip very large values — usually bad alignment
+                if 0 <= v < 1 << 32:
+                    numerics.append((field_num, f"i{v}"))
+                pos = new_pos - 1  # -1 because outer loop does pos += 1
+        # wire type 5 — fixed32 (floats, int32)
+        elif wire == 5 and tag > 0x08 and pos + 5 <= end:
             try:
                 f = struct.unpack("<f", data[pos + 1 : pos + 5])[0]
                 if -1e9 < f < 1e9:
@@ -75,7 +68,7 @@ def _extract_protobuf_numerics(data, start, end):
             except struct.error:
                 pass
         pos += 1
-    return numerics
+    return strings + numerics
 
 
 def _read_varint(data, pos, end):
@@ -93,43 +86,152 @@ def _read_varint(data, pos, end):
     return None, pos
 
 
-def _parse_segb_records(data, include_numerics=False):
-    """Parse SEGB (Segmented Binary) file and yield (timestamp, strings)
-    or (timestamp, strings, numerics) tuples.
+# Streams whose protobuf payloads are dominated by sensor numerics
+# (brightness deltas, RSSI, link quality). The numeric fallback in
+# _extract_protobuf_strings turns these into unreadable junk like
+# "f1.401e-45 | f-1.01e+05 | i1 …" — those bytes are alignment artifacts,
+# not real values. For these streams, drop numerics and emit only real
+# strings (UUIDs, bundle ids) plus the timestamp.
+_NUMERIC_NOISE_STREAMS = frozenset({
+    "Device.Display.Backlight",
+    "Device.Wireless.WiFi",
+    "Device.Wireless.Bluetooth",
+    "Device.Wireless.BluetoothNearbyDevice",
+    "Notification.Usage",
+    "UserFocus.InferredMode",
+    "UserFocus.ComputedMode",
+    # Tahoe streams whose protobuf payloads carry sensor numerics next to
+    # the useful strings — drop the alignment-artifact floats so analysts
+    # see UUIDs + bundle ids + task identifiers cleanly.
+    "Lighthouse.Ledger.TaskCustomEvent",
+    "Lighthouse.Ledger.TaskStatus",
+    "Lighthouse.Ledger.TaskTelemetry",
+    "Lighthouse.Ledger.TaskError",
+    "Lighthouse.Ledger.TrialdEvent",
+    "Lighthouse.Ledger.LighthousePluginEvent",
+    "Lighthouse.Ledger.DeviceTelemetry",
+    "Lighthouse.Ledger.DediscoPrivacyEvent",
+    "Lighthouse.Ledger.MlruntimedEvent",
+    "GenerativeModels.GenerativeFunctions.Instrumentation",
+    "SystemSettings.SearchTerms",
+    "Siri.SELFProcessedEvent",
+    "Siri.Metrics.OnDeviceDigestUsageMetrics",
+    "Siri.Metrics.OnDeviceDigestSegmentsCohorts",
+    "Siri.Metrics.OnDeviceDigestExperimentMetrics",
+    "Siri.ODDI.ScorecardMetrics",
+    "Siri.PrivateLearning.SELFEvent",
+    "LLMCache.CacheManagerTelemetry",
+    "MediaAnalysis.VisualSearch.Processing",
+    "MediaAnalysis.PEC.Processing",
+    "Safari.WebPagePerformance",
+    "Safari.AutoPlay",
+    "IntelligencePlatform.Views.Updated",
+})
 
-    Scans the entire file for Cocoa float64 timestamps in protobuf fixed64
-    fields, then extracts nearby protobuf string fields for context. When
-    ``include_numerics`` is true, also yields decoded varint/fixed32 values
-    (needed for streams like Display/WiFi that carry only numeric payloads).
+
+def _is_numeric_token(s):
+    """A token from _extract_protobuf_strings's numeric fallback starts
+    with 'f' or 'i' followed by a digit, '-' or '+'."""
+    return len(s) >= 2 and s[0] in ("f", "i") and (s[1].isdigit() or s[1] in "-+")
+
+
+def _filter_real_strings(strings):
+    """Drop numeric tokens (varint/fixed32) emitted as ``i123`` / ``f1.2e-3``
+    by ``_extract_protobuf_strings``. They're byte-alignment artifacts —
+    random bytes that happen to look like a valid protobuf tag followed by
+    a varint or float. Removing them everywhere makes the ``strings``
+    field readable and prevents polluting field-indexed lookups (e.g.
+    ``app_in_focus`` picks bundle_id from field 6 — if a noise token at
+    field 6 sneaks in, the dict lookup picks the wrong value)."""
+    return [(fnum, s) for fnum, s in strings if not _is_numeric_token(s)]
+
+
+def _join_strings(strings, stream_name):
+    """Join extracted tokens with numeric-junk filtered out globally.
+    ``stream_name`` is kept for backwards-compatibility with callers but is
+    no longer used to decide noise filtering — numerics are always dropped."""
+    return " | ".join(s for _, s in _filter_real_strings(strings))
+
+
+def _parse_segb_records(data):
+    """Parse SEGB (Segmented Binary) file and yield (timestamp, strings) tuples.
+
+    Older Biome streams encoded timestamps as float64 Cocoa seconds in a
+    protobuf fixed64 field. macOS 26 (Tahoe) streams (Lighthouse.Ledger.*,
+    Siri.Remembers.*, AppleIntelligence.Reporting.*, SystemSettings.*) often
+    use int64 Cocoa-nanosecond timestamps and place them under
+    field_num=1 (tag byte 0x09) which the legacy scan rejected.
+
+    Strategy: scan every position; at each candidate, try both decodings
+    (float64-seconds, int64-nanoseconds) and only accept values within the
+    plausible Cocoa window. Dedupe nearby hits so we don't emit a record
+    per byte of the same timestamp.
+
+    Fallback: very sparse SEGB segments (e.g. ``SystemSettings.SearchTerms``)
+    contain a single header timestamp at bytes 0x08..0x10 and no per-record
+    timestamps. When the body scan finds nothing, we emit one synthesized
+    record per segment using the header timestamp + every printable string.
     """
     if len(data) < 0x30 or data[:4] != b"SEGB":
         return
 
+    # Plausible Cocoa-epoch window: 2023..2028 in seconds and ns.
+    LO_S, HI_S = 700_000_000, 900_000_000
+    LO_NS, HI_NS = LO_S * 1_000_000_000, HI_S * 1_000_000_000
+
     pos = 0x20
     last_ts_pos = -100  # deduplicate nearby timestamps
+    body_hits = 0
 
     while pos < len(data) - 9:
         tag = data[pos]
-        if (tag & 0x07) == 1 and tag > 0x08:  # wire type 1 = fixed64
-            try:
-                val = struct.unpack("<d", data[pos + 1 : pos + 9])[0]
-            except struct.error:
-                pos += 1
-                continue
+        wire = tag & 0x07
+        # Accept any fixed64-tagged value (wire type 1). Don't require
+        # tag > 0x08 — Tahoe streams put the timestamp in field_num=1
+        # (tag byte 0x09) where the legacy scan rejected.
+        if wire != 1 or tag == 0:
+            pos += 1
+            continue
+        if pos - last_ts_pos <= 8:
+            pos += 1
+            continue
 
-            if 700000000 < val < 900000000 and pos - last_ts_pos > 8:
-                ts = _cocoa_ts(val)
-                search_start = max(0x20, pos - 50)
-                search_end = min(len(data), pos + 250)
-                strings = _extract_protobuf_strings(data, search_start, search_end)
-                last_ts_pos = pos
-                if include_numerics:
-                    numerics = _extract_protobuf_numerics(data, search_start, search_end)
-                    yield ts, strings, numerics
-                else:
-                    yield ts, strings
+        try:
+            d_val = struct.unpack("<d", data[pos + 1 : pos + 9])[0]
+            i_val = struct.unpack("<q", data[pos + 1 : pos + 9])[0]
+        except struct.error:
+            pos += 1
+            continue
+
+        ts = None
+        if LO_S < d_val < HI_S:
+            ts = _cocoa_ts(d_val)
+        elif LO_NS < i_val < HI_NS:
+            ts = _cocoa_ts(i_val / 1_000_000_000)
+
+        if ts is not None:
+            search_start = max(0x20, pos - 50)
+            search_end = min(len(data), pos + 250)
+            strings = _extract_protobuf_strings(data, search_start, search_end)
+            last_ts_pos = pos
+            body_hits += 1
+            yield ts, strings
 
         pos += 1
+
+    # Header-timestamp fallback for sparse streams. The SEGB header carries
+    # a float64 Cocoa-seconds value at bytes 0x08..0x10 representing the
+    # segment's creation time.
+    if body_hits == 0:
+        try:
+            h_val = struct.unpack("<d", data[0x08:0x10])[0]
+        except struct.error:
+            return
+        if LO_S < h_val < HI_S:
+            ts = _cocoa_ts(h_val)
+            strings = _extract_protobuf_strings(data, 0x20, len(data))
+            if strings:
+                yield ts, strings
 
 
 # ── Record Descriptors ───────────────────────────────────────────────────
@@ -187,6 +289,59 @@ BiomeGenericRecord = TargetRecordDescriptor(
         ("string", "stream_name"),
         ("string", "strings"),
         ("string", "segment"),
+        ("path", "source"),
+    ],
+)
+
+BiomeEntityRecord = TargetRecordDescriptor(
+    "macos/biome/entity",
+    [
+        ("string", "entity_type"),
+        ("string", "identifier"),
+        ("string", "name"),
+        ("string", "details"),
+        ("path", "source"),
+    ],
+)
+
+BiomeEntityChangeRecord = TargetRecordDescriptor(
+    "macos/biome/entity_change",
+    [
+        ("datetime", "ts"),
+        ("string", "entity_type"),
+        ("string", "subject"),
+        ("path", "source"),
+    ],
+)
+
+BiomeRecentAppRecord = TargetRecordDescriptor(
+    "macos/biome/recent_app",
+    [
+        ("datetime", "ts_event"),
+        ("string", "bundle_id"),
+        ("string", "parent_bundle_id"),
+        ("string", "short_version"),
+        ("string", "exact_version"),
+        ("string", "launch_reason"),
+        ("varint", "launch_type"),
+        ("float", "duration"),
+        ("varint", "starting"),
+        ("varint", "native_arch"),
+        ("string", "extension_host"),
+        ("path", "source"),
+    ],
+)
+
+BiomeCloudSyncRecord = TargetRecordDescriptor(
+    "macos/biome/cloud_sync",
+    [
+        ("datetime", "ts_start"),
+        ("datetime", "ts_end"),
+        ("string", "session_id"),
+        ("varint", "transport"),
+        ("varint", "reason"),
+        ("varint", "is_reciprocal"),
+        ("varint", "time_since_previous_sync"),
         ("path", "source"),
     ],
 )
@@ -278,30 +433,12 @@ class MacOSBiomePlugin(Plugin):
             except Exception as e:
                 self.target.log.warning("Error reading biome stream %s: %s", path, e)
 
-    # Streams whose payload is purely numeric (no useful strings in the
-    # protobuf) benefit from numerics dumped into the `strings` column.
-    _NUMERIC_STREAMS = {
-        "Device.Display.Backlight",
-        "Device.Wireless.WiFi",
-        "Device.Wireless.Bluetooth",
-        "Device.Power.LowPowerMode",
-        "_DKEvent.Device.LowPowerMode",
-        "_DKEvent.Activity.Level",
-    }
-
     def _parse_stream_generic(self, stream_name):
         """Generic parser that yields BiomeGenericRecord for any stream."""
-        want_numerics = stream_name in self._NUMERIC_STREAMS
         for path, _data_source, data in self._iter_stream(stream_name):
             try:
-                for record in _parse_segb_records(data, include_numerics=want_numerics):
-                    if want_numerics:
-                        ts, strings, numerics = record
-                        parts = [s for _, s in strings] + [n for _, n in numerics]
-                    else:
-                        ts, strings = record
-                        parts = [s for _, s in strings]
-                    str_vals = " | ".join(parts)
+                for ts, strings in _parse_segb_records(data):
+                    str_vals = _join_strings(strings, stream_name)
                     yield BiomeGenericRecord(
                         ts=ts,
                         stream_name=stream_name,
@@ -344,7 +481,7 @@ class MacOSBiomePlugin(Plugin):
             for path, data_source, data in self._iter_stream(stream_name):
                 try:
                     for ts, strings in _parse_segb_records(data):
-                        str_vals = " | ".join(s for _, s in strings)
+                        str_vals = _join_strings(strings, stream_name)
                         yield BiomeStreamRecord(
                             ts=ts,
                             stream_name=stream_name,
@@ -365,7 +502,9 @@ class MacOSBiomePlugin(Plugin):
         for path, _data_source, data in self._iter_stream("App.InFocus"):
             try:
                 for ts, strings in _parse_segb_records(data):
-                    str_dict = dict(strings)
+                    # Filter numerics so noise tokens at field-num 6 or 9
+                    # don't shadow the real bundle_id / version strings.
+                    str_dict = dict(_filter_real_strings(strings))
                     bundle_id = str_dict.get(6, "")
                     version = str_dict.get(9, "")
                     if bundle_id:
@@ -388,7 +527,7 @@ class MacOSBiomePlugin(Plugin):
         for path, _data_source, data in self._iter_stream("App.Intent"):
             try:
                 for ts, strings in _parse_segb_records(data):
-                    str_vals = [val for _, val in strings]
+                    str_vals = [val for _, val in _filter_real_strings(strings)]
                     bundle_id = intent_class = intent_verb = ""
                     for val in str_vals:
                         if "." in val and not val.startswith("IN") and not val.startswith("Send"):
@@ -438,8 +577,14 @@ class MacOSBiomePlugin(Plugin):
 
     @export(record=BiomeGenericRecord)
     def bluetooth(self) -> Iterator[BiomeGenericRecord]:
-        """Parse Device.Wireless.Bluetooth — Bluetooth connection events."""
-        yield from self._parse_stream_generic("Device.Wireless.Bluetooth")
+        """Parse Bluetooth events. Reads both ``Device.Wireless.Bluetooth``
+        (pre-Tahoe) and ``Device.Wireless.BluetoothNearbyDevice`` (Tahoe+) —
+        Apple renamed the stream in macOS 26."""
+        for stream in (
+            "Device.Wireless.Bluetooth",
+            "Device.Wireless.BluetoothNearbyDevice",
+        ):
+            yield from self._parse_stream_generic(stream)
 
     @export(record=BiomeGenericRecord)
     def wifi(self) -> Iterator[BiomeGenericRecord]:
@@ -537,6 +682,11 @@ class MacOSBiomePlugin(Plugin):
         yield from self._parse_stream_generic("ProactiveHarvesting.Mail")
 
     @export(record=BiomeGenericRecord)
+    def intelligence_donations(self) -> Iterator[BiomeGenericRecord]:
+        """Parse IntelligenceEngine.Interaction.Donation — Siri intelligence donations."""
+        yield from self._parse_stream_generic("IntelligenceEngine.Interaction.Donation")
+
+    @export(record=BiomeGenericRecord)
     def siri_execution(self) -> Iterator[BiomeGenericRecord]:
         """Parse Siri.Execution — Siri command executions."""
         yield from self._parse_stream_generic("Siri.Execution")
@@ -555,3 +705,427 @@ class MacOSBiomePlugin(Plugin):
     def screen_sharing(self) -> Iterator[BiomeGenericRecord]:
         """Parse Screen.Sharing — screen sharing sessions."""
         yield from self._parse_stream_generic("Screen.Sharing")
+
+    # ── Tahoe / Apple Intelligence streams (macOS 26+) ───────────────────
+
+    @export(record=BiomeGenericRecord)
+    def apple_intelligence_tasks(self) -> Iterator[BiomeGenericRecord]:
+        """Parse the ``Lighthouse.Ledger.*`` stream family — Apple
+        Intelligence's task execution ledger introduced in Tahoe.
+
+        Captures, per record: which background AI / Siri task ran, its
+        lifecycle phase (start / load / process / upload / finished),
+        status transitions (Running / Completed / Not Started), and any
+        emitted telemetry or errors. The ``strings`` field carries the
+        task identifier (e.g. ``com.apple.aiml.mlpt.FedStats.MLHostPlugin.
+        Message-Spam-Detection``) plus the phase/status token.
+        """
+        for stream in (
+            "Lighthouse.Ledger.TaskCustomEvent",
+            "Lighthouse.Ledger.TaskStatus",
+            "Lighthouse.Ledger.TaskTelemetry",
+            "Lighthouse.Ledger.TaskError",
+            "Lighthouse.Ledger.TrialdEvent",
+            "Lighthouse.Ledger.LighthousePluginEvent",
+            "Lighthouse.Ledger.DeviceTelemetry",
+            "Lighthouse.Ledger.DediscoPrivacyEvent",
+            "Lighthouse.Ledger.MlruntimedEvent",
+        ):
+            yield from self._parse_stream_generic(stream)
+
+    @export(record=BiomeGenericRecord)
+    def system_settings_search(self) -> Iterator[BiomeGenericRecord]:
+        """Parse ``SystemSettings.SearchTerms`` — Tahoe+ stream recording
+        every query typed into the System Settings search box (e.g. the
+        user typing ``shar`` to find Bluetooth Sharing). Forensically
+        useful: directly attributes intent to the user."""
+        yield from self._parse_stream_generic("SystemSettings.SearchTerms")
+
+    @export(record=BiomeGenericRecord)
+    def ai_model_catalog(self) -> Iterator[BiomeGenericRecord]:
+        """Parse AI model asset delivery and catalog subscription streams.
+
+        - ``AppleIntelligence.Reporting.AssetDeliveryLog.ModelCatalog`` —
+          which Apple foundation models the device fetched, when, for
+          which Apple Intelligence use case
+          (e.g. ``memoryCreation.AssetCurationOutlier``).
+        - ``ModelCatalog.Subscriptions.Decisions`` — model subscription
+          decisions (whether each use case opted into a model).
+        """
+        for stream in (
+            "AppleIntelligence.Reporting.AssetDeliveryLog.ModelCatalog",
+            "ModelCatalog.Subscriptions.Decisions",
+        ):
+            yield from self._parse_stream_generic(stream)
+
+    @export(record=BiomeGenericRecord)
+    def generative_functions(self) -> Iterator[BiomeGenericRecord]:
+        """Parse ``GenerativeModels.GenerativeFunctions.Instrumentation`` —
+        Apple Intelligence per-request instrumentation. Records each
+        generative-AI invocation: which function (e.g.
+        ``summarization.summarizeMailMessage``), source app
+        (``com.apple.mail``), source record id, model used, and lifecycle
+        events (``executeRequest.begin`` / ``transitionAsset``). High
+        forensic value: per-prompt trace of every AI feature the user
+        triggered."""
+        yield from self._parse_stream_generic(
+            "GenerativeModels.GenerativeFunctions.Instrumentation"
+        )
+
+    @export(record=BiomeGenericRecord)
+    def siri_remembers(self) -> Iterator[BiomeGenericRecord]:
+        """Parse the ``Siri.Remembers.*`` stream family — Siri's persistent
+        memory of past user interactions. Includes message history,
+        interaction history, call history, audio history, and assistant
+        suggestions where present."""
+        for stream in (
+            "Siri.Remembers.MessageHistory",
+            "Siri.Remembers.InteractionHistory",
+            "Siri.Remembers.CallHistory",
+            "Siri.Remembers.AudioHistory",
+            "Siri.Remembers.AssistantSuggestions",
+        ):
+            yield from self._parse_stream_generic(stream)
+
+    @export(record=BiomeGenericRecord)
+    def siri_self_events(self) -> Iterator[BiomeGenericRecord]:
+        """Parse ``Siri.SELFProcessedEvent`` — Siri's Self-Experience
+        Learning Framework processed events (Tahoe+). Each record marks an
+        on-device Siri interaction that fed personalisation/learning."""
+        yield from self._parse_stream_generic("Siri.SELFProcessedEvent")
+
+    @export(record=BiomeGenericRecord)
+    def siri_metrics(self) -> Iterator[BiomeGenericRecord]:
+        """Parse the ``Siri.Metrics.*`` and ``Siri.ODDI.*`` family — Siri's
+        on-device digest, scorecard, and analytics seeds. Useful for
+        attributing on-device Siri activity to a session."""
+        for stream in (
+            "Siri.Metrics.OnDeviceDigestUsageMetrics",
+            "Siri.Metrics.OnDeviceDigestSegmentsCohorts",
+            "Siri.Metrics.OnDeviceDigestExperimentMetrics",
+            "Siri.ODDI.ScorecardMetrics",
+            "Siri.AnalyticsIdentifiers.UserSeed",
+            "Siri.AnalyticsIdentifiers.UserSamplingId",
+            "Siri.AnalyticsIdentifiers.HomeSeed",
+            "Siri.Orchestration.RequestContext",
+            "Siri.PostSiriEngagement",
+            "Siri.PrivateLearning.SELFEvent",
+            "Siri.Memories.ReferenceResolution",
+        ):
+            yield from self._parse_stream_generic(stream)
+
+    @export(record=BiomeGenericRecord)
+    def llm_cache(self) -> Iterator[BiomeGenericRecord]:
+        """Parse ``LLMCache.CacheManagerTelemetry`` — Tahoe+ stream of
+        on-device LLM cache events (which generative-model responses were
+        cached / replayed)."""
+        yield from self._parse_stream_generic("LLMCache.CacheManagerTelemetry")
+
+    @export(record=BiomeGenericRecord)
+    def media_analysis(self) -> Iterator[BiomeGenericRecord]:
+        """Parse the ``MediaAnalysis.*`` family — Photos / Camera on-device
+        analysis events: visual search processing and PEC (Person-Entity
+        Centric) processing. Captures when the OS analysed photos."""
+        for stream in (
+            "MediaAnalysis.VisualSearch.Processing",
+            "MediaAnalysis.PEC.Processing",
+        ):
+            yield from self._parse_stream_generic(stream)
+
+    @export(record=BiomeGenericRecord)
+    def safari_extra(self) -> Iterator[BiomeGenericRecord]:
+        """Parse Tahoe-era Safari signals not covered by the other Safari
+        functions: ``Safari.WebPagePerformance`` (page-load perf) and
+        ``Safari.AutoPlay`` (sites that auto-played media)."""
+        for stream in (
+            "Safari.WebPagePerformance",
+            "Safari.AutoPlay",
+            "Safari.Browsing.Assistant",
+        ):
+            yield from self._parse_stream_generic(stream)
+
+    @export(record=BiomeGenericRecord)
+    def messages_shared(self) -> Iterator[BiomeGenericRecord]:
+        """Parse ``Messages.SharedWithYou.Feedback`` — interactions with
+        Shared-with-You content surfaced from Messages."""
+        yield from self._parse_stream_generic("Messages.SharedWithYou.Feedback")
+
+    @export(record=BiomeGenericRecord)
+    def intelligence_views_updated(self) -> Iterator[BiomeGenericRecord]:
+        """Parse ``IntelligencePlatform.Views.Updated`` — emitted whenever
+        the Intelligence Platform's ``views.db`` is updated. Correlates
+        directly with ``wifiintelligence.person_interactions`` /
+        ``entity_aliases`` write events."""
+        yield from self._parse_stream_generic("IntelligencePlatform.Views.Updated")
+
+    # ── Biome SQLite databases ───────────────────────────────────────────
+    #
+    # In addition to the SEGB streams, Biome maintains several SQLite stores
+    # under ~/Library/Biome/ that hold *structured* relational data — entity
+    # graphs, recently launched apps, and CloudKit sync sessions. These are
+    # entirely separate from the streams/ tree and need their own parsers.
+
+    def _open_sqlite(self, db_path):
+        with db_path.open("rb") as fh:
+            data = fh.read()
+        tmp = tempfile.NamedTemporaryFile(suffix=".db")  # noqa: SIM115
+        tmp.write(data)
+        tmp.flush()
+        for suffix in ("-wal", "-shm"):
+            src = db_path.parent.joinpath(db_path.name + suffix)
+            if src.exists():
+                with src.open("rb") as sf, open(tmp.name + suffix, "wb") as df:  # noqa: PTH123
+                    df.write(sf.read())
+        conn = sqlite3.connect(tmp.name)
+        conn.row_factory = sqlite3.Row
+        return conn, tmp
+
+    @export(record=BiomeEntityRecord)
+    def entities(self) -> Iterator[BiomeEntityRecord]:
+        """Parse ``~/Library/Biome/databases/IntelligencePlatform.Entity/``
+        ``IntelligencePlatform.Entity.sqlite3`` — the on-device entity graph
+        that Apple Intelligence builds from messages, contacts, mail, photos,
+        and calendars. Surfaces Person, Location, FlightReservation,
+        SportsTeam, HolidayEvent, and software entities under a unified
+        ``entity_type`` discriminator."""
+        for db_path in self.target.fs.path("/").glob(
+            "Users/*/Library/Biome/databases/IntelligencePlatform.Entity/IntelligencePlatform.Entity.sqlite3"
+        ):
+            try:
+                yield from self._parse_entities(db_path)
+            except Exception as e:
+                self.target.log.warning("Error parsing IntelligencePlatform.Entity %s: %s", db_path, e)
+
+    def _parse_entities(self, db_path):
+        conn, tmp = self._open_sqlite(db_path)
+        try:
+            cur = conn.cursor()
+            tables = {r[0] for r in cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            specs = [
+                # (table, kind, identifier_col, fields_to_keep)
+                ("Person", "person", "identifier",
+                 ["fullName", "names", "emailAddresses", "phoneNumbers",
+                  "url", "employer", "personRelationship", "dateOfBirth",
+                  "isCurrentUser"]),
+                ("Location", "location", "identifier",
+                 ["name", "address", "latitude", "longitude", "country",
+                  "thoroughfare", "locality", "postalCode"]),
+                ("FlightReservations", "flight_reservation", "identifier",
+                 ["flightNumber", "carrierCode", "departureAirportCode",
+                  "departureAirportName", "departureTime",
+                  "arrivalAirportCode", "arrivalAirportName", "arrivalTime",
+                  "passengerNames", "extractionSource"]),
+                ("HolidayEvent", "holiday", "identifier",
+                 ["name", "occurances", "alternateIds", "isA"]),
+                ("SportsTeams", "sports_team", "identifier",
+                 ["name", "league", "shortName", "sport", "url"]),
+                ("software", "software", "identifier",
+                 ["name", "version", "publisher", "url"]),
+            ]
+            for table, kind, ident_col, _ in specs:
+                if table not in tables:
+                    continue
+                cols = {r[1] for r in cur.execute(f"PRAGMA table_info({table})").fetchall()}
+                try:
+                    cur.execute(f"SELECT * FROM {table}")  # noqa: S608
+                except sqlite3.OperationalError:
+                    continue
+                for row in cur:
+                    detail_parts = []
+                    for col_name in cols:
+                        if col_name in (ident_col, "subject"):
+                            continue
+                        v = row[col_name] if col_name in row.keys() else None
+                        if v is None or v == "" or (isinstance(v, (int, float)) and v == 0):
+                            continue
+                        detail_parts.append(f"{col_name}={v}")
+                    yield BiomeEntityRecord(
+                        entity_type=kind,
+                        identifier=str(row[ident_col] if ident_col in row.keys() else (
+                            row["subject"] if "subject" in row.keys() else ""
+                        )),
+                        name=(row["name"] if "name" in row.keys() else None)
+                        or (row["fullName"] if "fullName" in row.keys() else None)
+                        or "",
+                        details=" | ".join(detail_parts[:12]),
+                        source=db_path,
+                        _target=self.target,
+                    )
+        finally:
+            conn.close()
+            tmp.close()
+
+    @export(record=BiomeEntityChangeRecord)
+    def entity_changes(self) -> Iterator[BiomeEntityChangeRecord]:
+        """Parse the ``*Changes`` audit tables in ``IntelligencePlatform.
+        Entity.sqlite3`` — every time the OS updated an entity it wrote a
+        row with the (Cocoa-epoch) timestamp. Gives a per-entity
+        modification timeline that's invaluable for case work."""
+        for db_path in self.target.fs.path("/").glob(
+            "Users/*/Library/Biome/databases/IntelligencePlatform.Entity/IntelligencePlatform.Entity.sqlite3"
+        ):
+            try:
+                yield from self._parse_entity_changes(db_path)
+            except Exception as e:
+                self.target.log.warning(
+                    "Error parsing IntelligencePlatform.Entity changes %s: %s", db_path, e
+                )
+
+    def _parse_entity_changes(self, db_path):
+        conn, tmp = self._open_sqlite(db_path)
+        try:
+            cur = conn.cursor()
+            tables = [
+                r[0] for r in cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%Changes'"
+                ).fetchall()
+            ]
+            for tbl in tables:
+                entity_type = tbl[:-len("Changes")] if tbl.endswith("Changes") else tbl
+                try:
+                    cur.execute(f"SELECT subject, updatedTimestamp FROM {tbl}")  # noqa: S608
+                except sqlite3.OperationalError:
+                    continue
+                for row in cur:
+                    yield BiomeEntityChangeRecord(
+                        ts=_cocoa_ts(row["updatedTimestamp"]),
+                        entity_type=entity_type,
+                        subject=str(row["subject"] or ""),
+                        source=db_path,
+                        _target=self.target,
+                    )
+
+        finally:
+            conn.close()
+            tmp.close()
+
+    @export(record=BiomeRecentAppRecord)
+    def recent_apps(self) -> Iterator[BiomeRecentAppRecord]:
+        """Parse ``~/Library/Biome/databases/Games.RecentlyPlayed/Games.
+        RecentlyPlayed.sqlite3`` — despite the name this table captures
+        EVERY foreground app launch the OS observed (the "AppsRecently
+        Focused" aggregation that Game Center and Spotlight reuse).
+        Includes bundle id, version, launch reason, duration, and the
+        event timestamp."""
+        for db_path in self.target.fs.path("/").glob(
+            "Users/*/Library/Biome/databases/Games.RecentlyPlayed/Games.RecentlyPlayed.sqlite3"
+        ):
+            try:
+                yield from self._parse_recent_apps(db_path)
+            except Exception as e:
+                self.target.log.warning("Error parsing Games.RecentlyPlayed %s: %s", db_path, e)
+
+    def _parse_recent_apps(self, db_path):
+        conn, tmp = self._open_sqlite(db_path)
+        try:
+            cur = conn.cursor()
+            tables = {r[0] for r in cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            table = "appsrecentlyfocused_keyedFirstMatchingRecord"
+            if table not in tables:
+                return
+            cols = {r[1] for r in cur.execute(f"PRAGMA table_info({table})").fetchall()}
+
+            def has(c):
+                return c if c in cols else "NULL"
+
+            select = ", ".join([
+                f"{has('bundleid')} AS bundle_id",
+                f"{has('parentbundleid')} AS parent_bundle_id",
+                f"{has('eventtimestamp')} AS ts_event",
+                f"{has('exactversionstring')} AS version",
+                f"{has('shortversionstring')} AS short_version",
+                f"{has('launchreason')} AS launch_reason",
+                f"{has('launchtype')} AS launch_type",
+                f"{has('duration')} AS duration",
+                f"{has('starting')} AS starting",
+                f"{has('isnativearchitecture')} AS native",
+                f"{has('extensionhostid')} AS ext_host",
+                f"{has('displaytype')} AS display_type",
+            ])
+            cur.execute(f"SELECT {select} FROM {table} ORDER BY ts_event DESC")  # noqa: S608
+            for row in cur:
+                # appsrecentlyfocused uses UNIX-epoch seconds, NOT the usual
+                # Cocoa epoch — verified against actual data.
+                ts = None
+                if row["ts_event"]:
+                    try:
+                        ts = datetime.fromtimestamp(float(row["ts_event"]), tz=timezone.utc)
+                    except (OSError, OverflowError, ValueError, TypeError):
+                        ts = None
+                yield BiomeRecentAppRecord(
+                    ts_event=ts,
+                    bundle_id=row["bundle_id"] or "",
+                    parent_bundle_id=row["parent_bundle_id"] or "",
+                    short_version=row["short_version"] or "",
+                    exact_version=row["version"] or "",
+                    launch_reason=row["launch_reason"] or "",
+                    launch_type=row["launch_type"] or 0,
+                    duration=row["duration"] or 0.0,
+                    starting=row["starting"] or 0,
+                    native_arch=row["native"] or 0,
+                    extension_host=row["ext_host"] or "",
+                    source=db_path,
+                    _target=self.target,
+                )
+        finally:
+            conn.close()
+            tmp.close()
+
+    @export(record=BiomeCloudSyncRecord)
+    def cloud_sync(self) -> Iterator[BiomeCloudSyncRecord]:
+        """Parse ``~/Library/Biome/sync/sync.db``'s ``SyncSessionLog`` table
+        — every Biome→iCloud sync session with start / end timestamps,
+        transport (Wi-Fi / cellular), reason, reciprocal flag, and the gap
+        since the previous sync."""
+        for db_path in self.target.fs.path("/").glob(
+            "Users/*/Library/Biome/sync/sync.db"
+        ):
+            try:
+                yield from self._parse_cloud_sync(db_path)
+            except Exception as e:
+                self.target.log.warning("Error parsing Biome sync.db %s: %s", db_path, e)
+
+    def _parse_cloud_sync(self, db_path):
+        conn, tmp = self._open_sqlite(db_path)
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    "SELECT session_id, start_timestamp, end_timestamp, transport, "
+                    "reason, is_reciprocal, time_since_previous_sync FROM SyncSessionLog"
+                )
+            except sqlite3.OperationalError:
+                return
+            for row in cur:
+                # Apple uses Cocoa-nanosecond timestamps here on Tahoe.
+                def _ns_to_cocoa(v):
+                    if v is None:
+                        return None
+                    try:
+                        v = float(v)
+                        # heuristic: > 1e15 is ns, else seconds
+                        seconds = v / 1_000_000_000 if abs(v) > 1e12 else v
+                        return _cocoa_ts(seconds)
+                    except Exception:
+                        return None
+                sid = row["session_id"]
+                if isinstance(sid, (bytes, memoryview)):
+                    sid = bytes(sid).hex()
+                yield BiomeCloudSyncRecord(
+                    ts_start=_ns_to_cocoa(row["start_timestamp"]),
+                    ts_end=_ns_to_cocoa(row["end_timestamp"]),
+                    session_id=str(sid or ""),
+                    transport=row["transport"] or 0,
+                    reason=row["reason"] or 0,
+                    is_reciprocal=row["is_reciprocal"] or 0,
+                    time_since_previous_sync=row["time_since_previous_sync"] or 0,
+                    source=db_path,
+                    _target=self.target,
+                )
+        finally:
+            conn.close()
+            tmp.close()

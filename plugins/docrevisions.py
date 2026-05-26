@@ -57,7 +57,7 @@ DocumentRevisionFileRecord = TargetRecordDescriptor(
         ("string", "file_name"),
         ("varint", "file_row_id"),
         ("varint", "file_inode"),
-        ("varint", "file_last_seen"),
+        ("datetime", "ts_last_seen"),
         ("path", "source"),
     ],
 )
@@ -235,7 +235,11 @@ class MacOSDocRevisionsPlugin(Plugin):
                     file_name=row["file_name"] or "",
                     file_row_id=row["file_row_id"] or 0,
                     file_inode=row["file_inode"] or 0,
-                    file_last_seen=row["file_last_seen"] or 0,
+                    ts_last_seen=(
+                        datetime.fromtimestamp(row["file_last_seen"], tz=timezone.utc)
+                        if row["file_last_seen"]
+                        else None
+                    ),
                     source=db_path,
                     _target=self.target,
                 )

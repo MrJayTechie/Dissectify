@@ -19,18 +19,24 @@ COCOA_EPOCH = datetime(2001, 1, 1, tzinfo=timezone.utc)
 
 
 def _cocoa_ns_ts(value):
-    """Convert a chat.db timestamp to datetime. Returns None for null/zero.
-
-    Two on-disk formats are in play on modern macOS:
-      * ``message.date`` — nanoseconds since 2001-01-01 (~1e18 magnitude).
-      * ``attachment.created_date`` — plain seconds since 2001-01-01
-        (~1e9 magnitude).
-    Detect the units from magnitude; anything below ~1e12 is seconds.
-    """
+    """Convert Cocoa nanosecond timestamp to datetime. Returns None for
+    null/zero."""
     if not value:
         return None
     try:
-        seconds = value if value < 1_000_000_000_000 else value / 1_000_000_000
+        return COCOA_EPOCH + timedelta(seconds=value / 1_000_000_000)
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _cocoa_smart_ts(value):
+    """chat.db is inconsistent: message.date is nanoseconds, but
+    attachment.created_date is seconds. Detect by magnitude — values
+    below 1e12 are seconds, above are nanoseconds."""
+    if not value:
+        return None
+    try:
+        seconds = value if abs(value) < 1e12 else value / 1_000_000_000
         return COCOA_EPOCH + timedelta(seconds=seconds)
     except (OSError, OverflowError, ValueError):
         return None
@@ -300,7 +306,7 @@ class IMessagePlugin(Plugin):
                 ORDER BY COALESCE(NULLIF(a.created_date, 0), m.date) DESC
             """)
             for row in cursor:
-                ts = _cocoa_ns_ts(row["att_created"]) or _cocoa_ns_ts(row["msg_date"])
+                ts = _cocoa_smart_ts(row["att_created"]) or _cocoa_ns_ts(row["msg_date"])
                 yield AttachmentRecord(
                     ts_created=ts,
                     filename=row["filename"] or "",

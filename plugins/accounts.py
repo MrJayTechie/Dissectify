@@ -61,11 +61,15 @@ def _decode_property_value(val):
     if val.startswith(_BPLIST_MAGIC):
         try:
             decoded = plistlib.loads(val)
-            # NSKeyedArchiver: follow $top.root UID reference into $objects
-            # so we return the leaf string/value instead of the archive
-            # wrapper (which always renders as "$version=100000 ...").
-            unarchived = _unwrap_keyed_archive(decoded)
-            rendered = _stringify_plist(unarchived)
+            # NSKeyedArchiver: follow $top.root UID into $objects to reach
+            # the real value. Without this we render archive plumbing.
+            if isinstance(decoded, dict) and decoded.get("$archiver") == "NSKeyedArchiver":
+                resolved = _resolve_keyed_archive(decoded)
+                if resolved is not None:
+                    rendered = _stringify_plist(resolved)
+                    if rendered:
+                        return rendered
+            rendered = _stringify_plist(decoded)
             if rendered:
                 return rendered
         except Exception:
@@ -94,55 +98,53 @@ def _decode_property_value(val):
     return f"<binary {len(val)} bytes>"
 
 
-def _unwrap_keyed_archive(obj, max_depth=6):
-    """If ``obj`` is an NSKeyedArchiver archive, follow ``$top.root`` through
-    ``$objects`` and return the resolved leaf (str/int/dict/list). Falls
-    through unchanged for plain plists or unresolvable archives."""
-    if not isinstance(obj, dict):
-        return obj
-    if obj.get("$archiver") != "NSKeyedArchiver":
-        return obj
-    objects = obj.get("$objects")
-    top = obj.get("$top", {})
-    if not isinstance(objects, list) or not isinstance(top, dict):
-        return obj
-    root = top.get("root")
+_NSARCHIVER_NOISE = {"$null", "$class", "$classname", "$classes"}
 
-    def resolve(node, depth=0):
-        if depth > max_depth:
-            return None
-        # plistlib exposes UID references as plistlib.UID; fall back to
-        # duck-typing if the runtime type isn't available.
-        if hasattr(node, "data"):  # plistlib.UID
-            idx = node.data
-            if 0 <= idx < len(objects):
-                return resolve(objects[idx], depth + 1)
-            return None
-        if isinstance(node, str) and node == "$null":
-            return None
-        if isinstance(node, list):
-            return [resolve(x, depth + 1) for x in node]
+
+def _resolve_keyed_archive(archive):
+    """Walk an NSKeyedArchiver dict: follow $top.root UID into $objects and
+    return the resolved leaf, dereferencing nested UIDs along the way."""
+    objects = archive.get("$objects")
+    top = archive.get("$top")
+    if not isinstance(objects, list) or not isinstance(top, dict):
+        return None
+    root_uid = top.get("root")
+    if not isinstance(root_uid, plistlib.UID):
+        return None
+
+    def resolve(node, seen):
+        if isinstance(node, plistlib.UID):
+            if node.data in seen or node.data >= len(objects):
+                return None
+            seen = seen | {node.data}
+            target = objects[node.data]
+            if isinstance(target, str) and target == "$null":
+                return None
+            return resolve(target, seen)
         if isinstance(node, dict):
-            # Class descriptors carry $classname/$classes and recursively
-            # describe themselves; skip them.
-            if "$classname" in node or "$classes" in node:
-                return node.get("$classname")
+            # NSArray / NSMutableArray: pick the NS.objects list
+            if "NS.objects" in node:
+                return [resolve(x, seen) for x in node["NS.objects"]]
+            # NSDictionary: zip NS.keys + NS.objects
+            if "NS.keys" in node and "NS.objects" in node:
+                keys = [resolve(k, seen) for k in node["NS.keys"]]
+                vals = [resolve(v, seen) for v in node["NS.objects"]]
+                return {k: v for k, v in zip(keys, vals) if k is not None}
+            # NSString / NSMutableString: NS.string carries the value
+            if "NS.string" in node:
+                return resolve(node["NS.string"], seen)
+            # Generic dict: drop archiver framing keys
             out = {}
             for k, v in node.items():
-                if k.startswith("$"):
+                if k in _NSARCHIVER_NOISE or k.startswith("$"):
                     continue
-                out[k] = resolve(v, depth + 1)
-            # NSMutableArray / NSArray serialise their members under "NS.objects"
-            if "NS.objects" in node:
-                return resolve(node["NS.objects"], depth + 1)
-            # NSString / NSMutableString use "NS.string"
-            if "NS.string" in node:
-                return resolve(node["NS.string"], depth + 1)
-            return out or node
+                out[k] = resolve(v, seen)
+            return out or None
+        if isinstance(node, list):
+            return [resolve(x, seen) for x in node]
         return node
 
-    resolved = resolve(root)
-    return resolved if resolved is not None else obj
+    return resolve(root_uid, set())
 
 
 def _stringify_plist(obj, depth=0):
@@ -319,6 +321,43 @@ class MacOSAccountsPlugin(Plugin):
                     )
             except Exception as e:
                 self.target.log.warning("Error parsing accounts %s: %s", path, e)
+            finally:
+                conn.close()
+                tmp.close()
+
+    @export(record=AccountTypeRecord)
+    def types(self) -> Iterator[AccountTypeRecord]:
+        """Parse registered account types."""
+        for path in self._paths:
+            try:
+                conn, tmp = self._open_db(path)
+            except Exception as e:
+                self.target.log.warning("Error opening %s: %s", path, e)
+                continue
+
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT ZIDENTIFIER, ZACCOUNTTYPEDESCRIPTION, ZOWNINGBUNDLEID,
+                           ZCREDENTIALTYPE, ZSUPPORTSAUTHENTICATION,
+                           ZSUPPORTSMULTIPLEACCOUNTS, ZOBSOLETE
+                    FROM ZACCOUNTTYPE
+                    ORDER BY ZIDENTIFIER
+                """)
+                for row in cursor:
+                    yield AccountTypeRecord(
+                        identifier=row["ZIDENTIFIER"] or "",
+                        description=row["ZACCOUNTTYPEDESCRIPTION"] or "",
+                        owning_bundle_id=row["ZOWNINGBUNDLEID"] or "",
+                        credential_type=row["ZCREDENTIALTYPE"] or "",
+                        supports_authentication=bool(row["ZSUPPORTSAUTHENTICATION"]),
+                        supports_multiple=bool(row["ZSUPPORTSMULTIPLEACCOUNTS"]),
+                        obsolete=bool(row["ZOBSOLETE"]),
+                        source=path,
+                        _target=self.target,
+                    )
+            except Exception as e:
+                self.target.log.warning("Error parsing account types %s: %s", path, e)
             finally:
                 conn.close()
                 tmp.close()

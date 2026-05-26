@@ -32,10 +32,35 @@ PersonInteractionRecord = TargetRecordDescriptor(
         ("datetime", "ts"),
         ("string", "entity_identifier"),
         ("varint", "communication_mechanism"),
+        ("string", "mechanism_label"),
+        ("string", "direction"),
         ("string", "bundle_id"),
         ("path", "source"),
     ],
 )
+
+
+# communicationMechanism enum — labels are best-effort. The actual app
+# is conveyed by bundle_id; this is a coarse interaction-class hint.
+# Observed in real data: code 4 appears for both MobileSMS and WhatsApp,
+# so it's "text-message-style" not "SMS specifically".
+_COMM_MECHANISM = {
+    0: "Unknown",
+    1: "Phone",
+    2: "Email",
+    3: "FaceTime",
+    4: "Message",       # SMS, iMessage, WhatsApp, etc. — see bundle_id
+    5: "MessageReply",
+    6: "FaceTimeAudio",
+    7: "Calendar",
+    8: "Contact",
+    9: "Mail",
+    10: "Maps",
+    11: "Note",
+    12: "ThirdPartyApp",
+    13: "Reminder",
+    14: "VoIP",
+}
 
 EntityAliasRecord = TargetRecordDescriptor(
     "macos/wifiintelligence/entity_aliases",
@@ -136,19 +161,38 @@ class WifiIntelligencePlugin(Plugin):
         conn, tmp = self._open_db(db_path)
         try:
             cursor = conn.cursor()
-            try:
-                cursor.execute("SELECT * FROM personInteractionMechanisms")
-            except sqlite3.OperationalError:
-                return
-            for row in cursor:
-                yield PersonInteractionRecord(
-                    ts=self._cocoa_to_dt(row["interactionDate"]),
-                    entity_identifier=row["entityIdentifier"] or "",
-                    communication_mechanism=row["communicationMechanism"] or 0,
-                    bundle_id=row["bundleID"] or "",
-                    source=db_path,
-                    _target=self.target,
-                )
+            tables = {
+                row[0]
+                for row in cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            # personInteractionMechanisms = directly observed (outgoing).
+            # bidirectionalPersonInteractionMechanisms = inferred from
+            # peer-side matches (incoming/two-way). Same schema; we tag
+            # records with a `direction` field so analysts can filter.
+            for table, direction in (
+                ("personInteractionMechanisms", "observed"),
+                ("bidirectionalPersonInteractionMechanisms", "bidirectional"),
+            ):
+                if table not in tables:
+                    continue
+                try:
+                    cursor.execute(f"SELECT * FROM {table}")  # noqa: S608
+                except sqlite3.OperationalError:
+                    continue
+                for row in cursor:
+                    code = row["communicationMechanism"] or 0
+                    yield PersonInteractionRecord(
+                        ts=self._cocoa_to_dt(row["interactionDate"]),
+                        entity_identifier=row["entityIdentifier"] or "",
+                        communication_mechanism=code,
+                        mechanism_label=_COMM_MECHANISM.get(code, str(code)),
+                        direction=direction,
+                        bundle_id=row["bundleID"] or "",
+                        source=db_path,
+                        _target=self.target,
+                    )
         finally:
             conn.close()
             tmp.close()
