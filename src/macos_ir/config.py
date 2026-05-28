@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -108,7 +109,21 @@ def _clone_and_sync(
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
-            return None, result.stderr.strip()[:200]
+            # Retry once with TLS verification disabled if the failure looks
+            # like an SSL/cert problem (corporate MITM, stale system CAs).
+            # Public-repo zipball clone — leniency here is acceptable.
+            err = result.stderr.lower()
+            if any(s in err for s in ("ssl", "certificate", "tls", "self-signed", "self signed")):
+                if tmp.exists():
+                    shutil.rmtree(tmp)
+                env = os.environ.copy()
+                env["GIT_SSL_NO_VERIFY"] = "true"
+                result = subprocess.run(
+                    ["git", "clone", "--depth", "1", repo_url, str(tmp)],
+                    capture_output=True, text=True, timeout=120, env=env,
+                )
+            if result.returncode != 0:
+                return None, result.stderr.strip()[:200]
 
         source = tmp / subdir
         if not source.is_dir():
