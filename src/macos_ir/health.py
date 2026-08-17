@@ -660,6 +660,86 @@ FDA_INDICATORS = [
 SIP_BLOCKED = ["xpdb"]
 SIP_PARTIAL = {"KeyChain": "private/var/db/SystemKey"}
 
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Missing reasons: Reasons for missing artifacts.
+# ──────────────────────────────────────────────────────────────────────────────
+
+MISSING_REASONS = {
+    "ChromiumBrowsers": "No Chromium-based browser installed",
+    "FirefoxFiles": "Firefox not installed",
+    "SafariFiles": "FDA not granted, or Safari data wiped",
+    "cookies": "FDA not granted, or no cookies stored",
+    "iMessage": "iMessage not configured, or FDA not granted",
+    "CallHistory": "No phone/FaceTime calls, or FDA not granted",
+    "FaceTime": "FaceTime not used, or FDA not granted",
+    "AddressBook": "No contacts, or FDA not granted",
+    "AppleMail": "Mail.app not used, or FDA not granted",
+    "Notifications": "FDA not granted",
+    "AppleNotes": "No Apple Notes, or FDA not granted",
+    "notes": "No Apple Notes (older path), or FDA not granted",
+    "KnowledgeC": "FDA not granted (key indicator)",
+    "Interactions": "FDA not granted (key indicator)",
+    "Biomes": "FDA not granted (key indicator)",
+    "WifiIntelligence": "No WiFi intelligence data, or FDA not granted",
+    "Powerlogs": "FDA not granted",
+    "ScreenTime": "ScreenTime disabled",
+    "Reminders": "No Reminders data, or FDA not granted",
+    "Calendars": "No calendar data",
+    "FindMy": "FindMy data not cached",
+    "SpotlightShortCuts": "No Spotlight shortcut data",
+    "Autostart": "Should always be present — possible collection error",
+    "KernelExtensions": "Should always be present — possible collection error",
+    "Applications": "Should always be present — possible collection error",
+    "LaunchPad": "FDA not granted",
+    "TCC": "FDA not granted (key indicator)",
+    "FirewallConfiguration": "Firewall config not found",
+    "KeyChain": "FDA not granted, or keychain files missing",
+    "ManagedDeviceProfile": "No MDM profiles (not enterprise-managed)",
+    "xpdb": "SIP-blocked (expected on live system)",
+    "Sudoers": "Should always be present — possible collection error",
+    "sudolastrun": "sudo never used",
+    "OSName": "Should always be present — possible collection error",
+    "OSInstallationDate": ".AppleSetupDone not found",
+    "Users": "Should always be present — possible collection error",
+    "localtime": "Should always be present — possible collection error",
+    "hosts": "Should always be present — possible collection error",
+    "etcFolder": "Should always be present — possible collection error",
+    "SharedFolder": "No SMB/AFP share points configured",
+    "DHCPLease": "No DHCP leases",
+    "InternetAccounts": "No internet accounts configured",
+    "LibraryPreferences": "Should always be present — possible collection error",
+    "AlternateLog": "Should always be present — possible collection error",
+    "CrashReporter": "No crash reports",
+    "PrintJobs": "No print job history",
+    "DSStore": "No .DS_Store files found",
+    "FsEvents": "No FSEvents data",
+    "DocumentRevisions": "Versions database empty or purged",
+    "Trash": "Trash is empty",
+    "QuickLook": "QuickLook cache empty or purged",
+    "ApplePayWallet": "Apple Pay not configured, or FDA not granted",
+    "InstallHistory": "Should always be present — possible collection error",
+    "SoftwareInstallationUpdates": "Should always be present — possible collection error",
+    "MicrosoftOfficeMRU": "Microsoft Office not installed",
+    "Applist": "Spotlight applist not found",
+    "SSHHost": "No SSH connections made",
+    "ard": "Apple Remote Desktop never enabled",
+    "msrdc": "Microsoft Remote Desktop not installed",
+    "ScreenSharing": "Screen Sharing never used",
+    "FavoriteVolumes": "No Finder sidebar favorites",
+    "lockdown": "No iOS device ever paired",
+    "ShellHistoryAndSessions": "No shell history",
+    "utmpx": "No login records",
+    "SavedState": "No saved application state",
+    "TerminalState": "Terminal no longer saves state on macOS 15",
+    "KeyboardDictionary": "No custom dictionary words",
+    "iCloud": "No iCloud data, or FDA not granted",
+    "iCloudLocalStorage": "No iCloud Drive local files",
+    "iDeviceBackup": "No local iPhone/iPad backups",
+}
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # ANSI colors
 # ──────────────────────────────────────────────────────────────────────────────
