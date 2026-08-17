@@ -41,7 +41,7 @@ from macos_ir.config import (
     COLLECTORS_DIR, LIVE_COLLECTORS_DIR, PLUGINS_DIR, VELO_DIR, BUILD_DIR,
     COLLECTED_DIR, SHELL_COLLECTOR,
 )
-from macos_ir.health import CollectionHealth, MISSING_REASONS
+from macos_ir.health import CollectionHealth
 from macos_ir.plugins import get_selected_functions
 from macos_ir.workbook import resolve_target, run_function, write_xlsx
 from macos_ir.guide import load_all as load_guide, GuideIndex, GuideEntry
@@ -1388,7 +1388,7 @@ class MacOSIRApp(App):
             key=lambda x: (x[1]["category"], x[1]["status"] != "PRESENT", x[0]),
         ):
             status = info["status"]
-            reason = MISSING_REASONS.get(name, "") if status == "MISSING" else ""
+            reason = f"Requires {info['privilege']}" if status == "MISSING" else ""
             if status == "PRESENT":
                 styled_status = Text("PRESENT", style="bold green")
             else:
